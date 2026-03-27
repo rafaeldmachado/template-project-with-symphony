@@ -369,7 +369,7 @@ resolve_stack() {
       _E2E='go test ./tests/e2e/...'
       _SETUP='go mod download'
       _CI="$GO_CI_STEPS"
-      _PKG="go mod init github.com/\$(git remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||;s|\.git\$||' || echo \"$PROJECT_NAME\")"
+      _PKG="go mod init github.com/${GITHUB_REPO:-$PROJECT_NAME}"
       ;;
 
     # ── Rust ─────────────────────────────────────────
@@ -389,7 +389,7 @@ resolve_stack() {
       _E2E='cargo test --test e2e'
       _SETUP='cargo fetch'
       _CI="$RUST_CI_STEPS"
-      _PKG='cargo init --name '"$PROJECT_NAME"
+      _PKG='cargo init --name "'"$PROJECT_NAME"'"'
       ;;
 
     # ── Elixir / Phoenix ─────────────────────────────
@@ -503,24 +503,25 @@ if command -v gh &>/dev/null; then
   if confirm "Configure GitHub integration?"; then
     SETUP_GITHUB=true
 
-    # Detect or ask for repo
-    DETECTED_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
-    if [ -n "$DETECTED_REPO" ]; then
-      GITHUB_REPO=$(ask "GitHub repository" "$DETECTED_REPO")
+    # Detect current remote as default, but always let user override
+    DETECTED_REPO=""
+    if DETECTED_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>&1); then
+      : # success — DETECTED_REPO is set
     else
-      GITHUB_REPO=$(ask "GitHub repository (owner/name)" "")
+      DETECTED_REPO=""  # not a GitHub repo or not authenticated
+    fi
+    GITHUB_REPO=$(ask "GitHub repository (owner/name)" "$DETECTED_REPO")
 
-      # Check if the repo exists; offer to create it if not
-      if [ -n "$GITHUB_REPO" ]; then
-        if ! gh repo view "$GITHUB_REPO" &>/dev/null; then
-          info "Repository $GITHUB_REPO does not exist yet."
-          if confirm "Create it now?"; then
-            CREATE_REPO=true
+    # Check if the repo exists; offer to create it if not
+    if [ -n "$GITHUB_REPO" ]; then
+      if ! gh repo view "$GITHUB_REPO" &>/dev/null; then
+        info "Repository $GITHUB_REPO does not exist yet."
+        if confirm "Create it now?"; then
+          CREATE_REPO=true
 
-            REPO_VISIBILITY=$(choose "Repository visibility:" \
-              "Private" \
-              "Public")
-          fi
+          REPO_VISIBILITY=$(choose "Repository visibility:" \
+            "Private" \
+            "Public")
         fi
       fi
     fi
@@ -656,11 +657,25 @@ if [ "$CREATE_REPO" = true ] && [ -n "$GITHUB_REPO" ]; then
   [ "$REPO_VISIBILITY" = "Public" ] && VISIBILITY_FLAG="--public"
 
   info "Creating repository $GITHUB_REPO..."
-  if gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin; then
+
+  # Update origin before creating so --source doesn't conflict with existing remote
+  PROJECT_URL="https://github.com/${GITHUB_REPO}.git"
+  if git remote get-url origin &>/dev/null; then
+    git remote set-url origin "$PROJECT_URL"
+  else
+    git remote add origin "$PROJECT_URL"
+  fi
+
+  CREATE_OUTPUT=$(gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin 2>&1)
+  CREATE_EXIT=$?
+  if [ $CREATE_EXIT -eq 0 ]; then
+    ok "Created repository: $GITHUB_REPO ($REPO_VISIBILITY)"
+  elif gh repo view "$GITHUB_REPO" &>/dev/null; then
+    # gh repo create may fail on --remote but still create the repo
     ok "Created repository: $GITHUB_REPO ($REPO_VISIBILITY)"
   else
-    warn "Failed to create repository — you can create it manually later"
-    warn "  gh repo create $GITHUB_REPO $VISIBILITY_FLAG --source . --remote origin"
+    fail "Failed to create repository: $CREATE_OUTPUT"
+    warn "Create it manually: gh repo create $GITHUB_REPO $VISIBILITY_FLAG"
   fi
 fi
 
@@ -758,7 +773,9 @@ LINT_HEADER
   cat >> "$ROOT_DIR/scripts/checks/lint.sh" <<'SHELLCHECK_BLOCK'
 if command -v shellcheck &>/dev/null; then
   echo "  shellcheck: checking scripts/"
-  find "$ROOT_DIR/scripts" -name "*.sh" -exec shellcheck -S warning {} + 2>&1 || true
+  find "$ROOT_DIR/scripts" -name "*.sh" -exec shellcheck -S warning {} + 2>&1 || {
+    echo "WARNING: shellcheck found issues (see output above)"
+  }
 fi
 
 SHELLCHECK_BLOCK
@@ -882,17 +899,25 @@ if [ "$AGENT_CHOICE" != "None / I'll configure later" ]; then
   if [ -f "$WORKFLOW_FILE" ]; then
     case "$AGENT_CHOICE" in
       "Claude Code (Anthropic)")
-        sed -i.bak 's/^  name: .*/  name: claude/' "$WORKFLOW_FILE"
-        sed -i.bak 's/^  model: .*/  model: sonnet/' "$WORKFLOW_FILE"
-        rm -f "${WORKFLOW_FILE}.bak"
-        ok "Set agent to Claude Code in WORKFLOW.md"
+        if grep -q '^  name: ' "$WORKFLOW_FILE" && grep -q '^  model: ' "$WORKFLOW_FILE"; then
+          sed -i.bak 's/^  name: .*/  name: claude/' "$WORKFLOW_FILE"
+          sed -i.bak 's/^  model: .*/  model: sonnet/' "$WORKFLOW_FILE"
+          rm -f "${WORKFLOW_FILE}.bak"
+          ok "Set agent to Claude Code in WORKFLOW.md"
+        else
+          warn "Could not find agent name/model fields in WORKFLOW.md — update manually"
+        fi
         warn "Add ANTHROPIC_API_KEY to your GitHub repo secrets"
         ;;
       "Codex (OpenAI)")
-        sed -i.bak 's/^  name: .*/  name: codex/' "$WORKFLOW_FILE"
-        sed -i.bak 's/^  model: .*/  model: o3/' "$WORKFLOW_FILE"
-        rm -f "${WORKFLOW_FILE}.bak"
-        ok "Set agent to Codex in WORKFLOW.md"
+        if grep -q '^  name: ' "$WORKFLOW_FILE" && grep -q '^  model: ' "$WORKFLOW_FILE"; then
+          sed -i.bak 's/^  name: .*/  name: codex/' "$WORKFLOW_FILE"
+          sed -i.bak 's/^  model: .*/  model: o3/' "$WORKFLOW_FILE"
+          rm -f "${WORKFLOW_FILE}.bak"
+          ok "Set agent to Codex in WORKFLOW.md"
+        else
+          warn "Could not find agent name/model fields in WORKFLOW.md — update manually"
+        fi
         warn "Add OPENAI_API_KEY to your GitHub repo secrets"
         ;;
     esac
@@ -902,16 +927,34 @@ fi
 # ── 11. Create GitHub labels ────────────────────────
 if [ "$CREATE_LABELS" = true ] && [ -n "$GITHUB_REPO" ]; then
   echo ""
-  info "Creating labels on $GITHUB_REPO..."
+  # Verify the repo exists before trying to create labels
+  if ! gh repo view "$GITHUB_REPO" &>/dev/null; then
+    warn "Repository $GITHUB_REPO not found on GitHub — skipping label creation"
+    info "Create labels later with: make setup  (or manually in Settings > Labels)"
+  else
+    info "Creating labels on $GITHUB_REPO..."
 
-  gh label create "ready"         --repo "$GITHUB_REPO" --color "0E8A16" --description "Issue is ready for agent work"   2>/dev/null && ok "Label: ready"         || info "Label 'ready' already exists"
-  gh label create "agent"         --repo "$GITHUB_REPO" --color "5319E7" --description "Handle with AI agent"            2>/dev/null && ok "Label: agent"         || info "Label 'agent' already exists"
-  gh label create "in-progress"   --repo "$GITHUB_REPO" --color "FBCA04" --description "Agent is working on this"        2>/dev/null && ok "Label: in-progress"   || info "Label 'in-progress' already exists"
-  gh label create "human-review"  --repo "$GITHUB_REPO" --color "0075CA" --description "PR ready for human review"       2>/dev/null && ok "Label: human-review"  || info "Label 'human-review' already exists"
-  gh label create "p0"            --repo "$GITHUB_REPO" --color "B60205" --description "Critical priority"               2>/dev/null && ok "Label: p0"            || info "Label 'p0' already exists"
-  gh label create "p1"            --repo "$GITHUB_REPO" --color "D93F0B" --description "High priority"                   2>/dev/null && ok "Label: p1"            || info "Label 'p1' already exists"
-  gh label create "p2"            --repo "$GITHUB_REPO" --color "FBCA04" --description "Normal priority"                 2>/dev/null && ok "Label: p2"            || info "Label 'p2' already exists"
-  gh label create "story"         --repo "$GITHUB_REPO" --color "C5DEF5" --description "User story"                      2>/dev/null && ok "Label: story"         || info "Label 'story' already exists"
+    create_label() {
+      local name="$1" color="$2" desc="$3"
+      OUTPUT=$(gh label create "$name" --repo "$GITHUB_REPO" --color "$color" --description "$desc" 2>&1)
+      if [ $? -eq 0 ]; then
+        ok "Label: $name"
+      elif echo "$OUTPUT" | grep -qi "already exists"; then
+        info "Label '$name' already exists"
+      else
+        warn "Failed to create label '$name': $OUTPUT"
+      fi
+    }
+
+    create_label "ready"        "0E8A16" "Issue is ready for agent work"
+    create_label "agent"        "5319E7" "Handle with AI agent"
+    create_label "in-progress"  "FBCA04" "Agent is working on this"
+    create_label "human-review" "0075CA" "PR ready for human review"
+    create_label "p0"           "B60205" "Critical priority"
+    create_label "p1"           "D93F0B" "High priority"
+    create_label "p2"           "FBCA04" "Normal priority"
+    create_label "story"        "C5DEF5" "User story"
+  fi
 fi
 
 # ── 12. Initialize stack package manager ─────────────
@@ -920,7 +963,13 @@ if [ -n "$PKG_INIT_CMD" ]; then
   if confirm "Initialize $STACK project scaffolding now?"; then
     info "Running: $PKG_INIT_CMD"
     cd "$ROOT_DIR"
-    eval "$PKG_INIT_CMD" && ok "Project scaffolded" || warn "Scaffolding had issues — check output above"
+    if eval "$PKG_INIT_CMD"; then
+      ok "Project scaffolded"
+    else
+      echo ""
+      fail "Scaffolding failed (exit code $?). Check the output above for details."
+      info "You can retry manually: $PKG_INIT_CMD"
+    fi
   else
     info "Skipped. Run manually later:"
     info "  cd $(basename "$ROOT_DIR") && $PKG_INIT_CMD"
@@ -937,7 +986,7 @@ if [ -n "$CI_SETUP_STEPS" ]; then
       # Use a temp file approach for multi-line replacement
       # (ENVIRON avoids awk -v breaking on embedded newlines)
       TEMP_FILE=$(mktemp)
-      CI_SETUP_STEPS_AWK="$CI_SETUP_STEPS" awk -v marker="$MARKER" '
+      if CI_SETUP_STEPS_AWK="$CI_SETUP_STEPS" awk -v marker="$MARKER" '
         $0 ~ marker {
           print ENVIRON["CI_SETUP_STEPS_AWK"]
           # Skip the commented examples that follow
@@ -946,9 +995,13 @@ if [ -n "$CI_SETUP_STEPS" ]; then
           next
         }
         { print }
-      ' "$SYMPHONY_FILE" > "$TEMP_FILE"
-      mv "$TEMP_FILE" "$SYMPHONY_FILE"
-      ok "Configured Symphony CI setup steps"
+      ' "$SYMPHONY_FILE" > "$TEMP_FILE" && [ -s "$TEMP_FILE" ]; then
+        mv "$TEMP_FILE" "$SYMPHONY_FILE"
+        ok "Configured Symphony CI setup steps"
+      else
+        rm -f "$TEMP_FILE"
+        warn "Failed to update Symphony workflow CI steps — update .github/workflows/symphony.yml manually"
+      fi
     fi
   fi
 fi
@@ -956,7 +1009,11 @@ fi
 # ── 14. Set up self-hosted runner ─────────────────────
 if [ "$SETUP_RUNNER" = true ]; then
   echo ""
-  "$SCRIPT_DIR/runner/setup.sh" || warn "Runner setup had issues — you can retry with: make setup-runner"
+  if ! "$SCRIPT_DIR/runner/setup.sh"; then
+    echo ""
+    fail "Runner setup failed. See the output above for details."
+    info "Retry later with: make setup-runner"
+  fi
 fi
 
 # ── 15. Update origin remote ──────────────────────────
@@ -981,21 +1038,33 @@ echo ""
 info "Committing configuration..."
 cd "$ROOT_DIR"
 git add -A
-git commit -m "Initialize project: ${PROJECT_NAME}
+
+if git diff --cached --quiet; then
+  info "No changes to commit"
+else
+  if git commit -m "Initialize project: ${PROJECT_NAME}
 
 Stack: ${STACK}
 Agent: ${AGENT_CHOICE}
 Deploy: ${DEPLOY_PROVIDER}
-Monitoring: ${MONITOR_CHOICE}"
-ok "Changes committed"
+Monitoring: ${MONITOR_CHOICE}"; then
+    ok "Changes committed"
+  else
+    fail "Git commit failed — check the output above"
+    info "You can commit manually: git add -A && git commit -m 'Initialize project'"
+  fi
+fi
 
 if git remote get-url origin &>/dev/null; then
   CURRENT_BRANCH=$(git branch --show-current)
   info "Pushing to origin/${CURRENT_BRANCH}..."
-  if git push -u origin "$CURRENT_BRANCH"; then
+  PUSH_OUTPUT=$(git push -u origin "$CURRENT_BRANCH" 2>&1)
+  PUSH_EXIT=$?
+  if [ $PUSH_EXIT -eq 0 ]; then
     ok "Pushed to origin/${CURRENT_BRANCH}"
   else
-    warn "Push failed — you can push manually with: git push origin ${CURRENT_BRANCH}"
+    fail "Push failed: $PUSH_OUTPUT"
+    info "Push manually with: git push -u origin ${CURRENT_BRANCH}"
   fi
 else
   warn "No remote 'origin' configured — skipping push"
