@@ -95,14 +95,14 @@ echo "  └───────────────────────
 echo -e "${RESET}"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "1/6  Project basics"
+header "1/7  Project basics"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 PROJECT_NAME=$(ask "Project name" "$(basename "$ROOT_DIR")")
 PROJECT_DESC=$(ask "One-line description" "")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "2/6  Stack"
+header "2/7  Stack"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 STACK=$(choose "Choose your stack:" \
@@ -197,12 +197,14 @@ case "$STACK" in
 esac
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "3/6  GitHub"
+header "3/7  GitHub"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 SETUP_GITHUB=false
 GITHUB_REPO=""
 CREATE_LABELS=false
+
+CREATE_REPO=false
 
 if command -v gh &>/dev/null; then
   if confirm "Configure GitHub integration?"; then
@@ -214,6 +216,20 @@ if command -v gh &>/dev/null; then
       GITHUB_REPO=$(ask "GitHub repository" "$DETECTED_REPO")
     else
       GITHUB_REPO=$(ask "GitHub repository (owner/name)" "")
+
+      # Check if the repo exists; offer to create it if not
+      if [ -n "$GITHUB_REPO" ]; then
+        if ! gh repo view "$GITHUB_REPO" &>/dev/null; then
+          info "Repository $GITHUB_REPO does not exist yet."
+          if confirm "Create it now?"; then
+            CREATE_REPO=true
+
+            REPO_VISIBILITY=$(choose "Repository visibility:" \
+              "Private" \
+              "Public")
+          fi
+        fi
+      fi
     fi
 
     if [ -n "$GITHUB_REPO" ] && confirm "Create Symphony labels (ready, agent, in-progress, human-review)?"; then
@@ -227,7 +243,7 @@ else
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "4/6  Deploys"
+header "4/7  Deploys"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DEPLOY_PROVIDER=$(choose "PR preview deploy provider:" \
@@ -237,16 +253,41 @@ DEPLOY_PROVIDER=$(choose "PR preview deploy provider:" \
   "Fly.io" \
   "None / I'll configure later")
 
+DEPLOY_TOKEN=""
+DEPLOY_PROJECT_ID=""
+
 case "$DEPLOY_PROVIDER" in
-  "Vercel")       DEPLOY_PROVIDER_KEY="vercel" ;;
-  "Netlify")      DEPLOY_PROVIDER_KEY="netlify" ;;
-  "Cloudflare Pages") DEPLOY_PROVIDER_KEY="cloudflare" ;;
-  "Fly.io")       DEPLOY_PROVIDER_KEY="fly" ;;
-  *)              DEPLOY_PROVIDER_KEY="" ;;
+  "Vercel")
+    DEPLOY_PROVIDER_KEY="vercel"
+    info "You can find your Vercel token at: https://vercel.com/account/tokens"
+    DEPLOY_TOKEN=$(ask "Vercel token (leave empty to set later)" "")
+    DEPLOY_PROJECT_ID=$(ask "Vercel project ID (leave empty to set later)" "")
+    ;;
+  "Netlify")
+    DEPLOY_PROVIDER_KEY="netlify"
+    info "You can find your Netlify token at: https://app.netlify.com/user/applications#personal-access-tokens"
+    DEPLOY_TOKEN=$(ask "Netlify token (leave empty to set later)" "")
+    DEPLOY_PROJECT_ID=$(ask "Netlify site ID (leave empty to set later)" "")
+    ;;
+  "Cloudflare Pages")
+    DEPLOY_PROVIDER_KEY="cloudflare"
+    info "You can find your Cloudflare API token at: https://dash.cloudflare.com/profile/api-tokens"
+    DEPLOY_TOKEN=$(ask "Cloudflare API token (leave empty to set later)" "")
+    DEPLOY_PROJECT_ID=$(ask "Cloudflare Pages project name (leave empty to set later)" "")
+    ;;
+  "Fly.io")
+    DEPLOY_PROVIDER_KEY="fly"
+    info "You can get a Fly.io token with: fly tokens create deploy"
+    DEPLOY_TOKEN=$(ask "Fly.io deploy token (leave empty to set later)" "")
+    DEPLOY_PROJECT_ID=$(ask "Fly.io app name (leave empty to set later)" "")
+    ;;
+  *)
+    DEPLOY_PROVIDER_KEY=""
+    ;;
 esac
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "5/6  AI Agent (for Symphony)"
+header "5/7  AI Agent (for Symphony)"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 info "Symphony dispatches AI agents to implement issues autonomously."
@@ -258,7 +299,7 @@ AGENT_CHOICE=$(choose "AI agent for autonomous work:" \
   "None / I'll configure later")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "6/6  Monitoring"
+header "6/7  Monitoring"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 MONITOR_CHOICE=$(choose "Error/performance monitoring:" \
@@ -267,11 +308,55 @@ MONITOR_CHOICE=$(choose "Error/performance monitoring:" \
   "Grafana" \
   "None / I'll configure later")
 
+MONITOR_DSN=""
+
+case "$MONITOR_CHOICE" in
+  "Sentry")
+    info "You can find your Sentry DSN at: Settings > Projects > [project] > Client Keys (DSN)"
+    MONITOR_DSN=$(ask "Sentry DSN (leave empty to set later)" "")
+    ;;
+  "Datadog")
+    info "You can find your Datadog API key at: https://app.datadoghq.com/organization-settings/api-keys"
+    MONITOR_DSN=$(ask "Datadog API key (leave empty to set later)" "")
+    ;;
+  "Grafana")
+    info "You'll need your Grafana Cloud OTLP endpoint for metrics/traces."
+    MONITOR_DSN=$(ask "Grafana endpoint or API key (leave empty to set later)" "")
+    ;;
+esac
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+header "7/7  Self-hosted runner"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SETUP_RUNNER=false
+
+info "Use your machine as a GitHub Actions runner to save CI minutes."
+info "When your machine is offline, jobs automatically fall back to GitHub-hosted runners."
+
+if confirm "Set up a self-hosted runner on this machine?"; then
+  SETUP_RUNNER=true
+fi
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 header "Applying configuration..."
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# ── 0. Clean up template-specific files ───────────────
+# ── 0. Create GitHub repository if requested ──────────
+if [ "$CREATE_REPO" = true ] && [ -n "$GITHUB_REPO" ]; then
+  VISIBILITY_FLAG="--private"
+  [ "$REPO_VISIBILITY" = "Public" ] && VISIBILITY_FLAG="--public"
+
+  info "Creating repository $GITHUB_REPO..."
+  if gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin; then
+    ok "Created repository: $GITHUB_REPO ($REPO_VISIBILITY)"
+  else
+    warn "Failed to create repository — you can create it manually later"
+    warn "  gh repo create $GITHUB_REPO $VISIBILITY_FLAG --source . --remote origin"
+  fi
+fi
+
+# ── 1. Clean up template-specific files ────────────────
 # These files belong to the template repo itself, not to
 # projects created from it. Removing them so your project
 # starts with a clean slate.
@@ -303,7 +388,7 @@ See [docs/SETUP.md](docs/SETUP.md) for full setup guide.
 README_EOF
 ok "Created project README.md"
 
-# ── 1. Activate GitHub config ──────────────────────────
+# ── 2. Activate GitHub config ──────────────────────────
 # The template ships _github/ (inactive) to avoid workflows
 # triggering on the template repo itself. Replace any
 # template-specific .github/ (CI, tests) with the project config.
@@ -322,22 +407,31 @@ else
   fi
 fi
 
-# ── 2. Make scripts executable ───────────────────────
+# ── 3. Make scripts executable ───────────────────────
 find "$ROOT_DIR/scripts" -name "*.sh" -exec chmod +x {} \;
 find "$ROOT_DIR/tests/structural" -name "*.sh" -exec chmod +x {} \;
 ok "Scripts made executable"
 
-# ── 3. Create directories ────────────────────────────
+# ── 4. Create directories ────────────────────────────
 mkdir -p "$ROOT_DIR/.worktrees"
 mkdir -p "$ROOT_DIR/.deploy-artifacts"
 mkdir -p "$ROOT_DIR/src"
 ok "Directories created"
 
-# ── 4. Write .env ────────────────────────────────────
-AGENT_KEY_LINE=""
+# ── 5. Write .env ────────────────────────────────────
+AGENT_KEY_NAME=""
+AGENT_KEY_VALUE=""
 case "$AGENT_CHOICE" in
-  "Claude Code (Anthropic)") AGENT_KEY_LINE="ANTHROPIC_API_KEY=" ;;
-  "Codex (OpenAI)")          AGENT_KEY_LINE="OPENAI_API_KEY=" ;;
+  "Claude Code (Anthropic)")
+    AGENT_KEY_NAME="ANTHROPIC_API_KEY"
+    info "You can find your API key at: https://console.anthropic.com/settings/keys"
+    AGENT_KEY_VALUE=$(ask "Anthropic API key (leave empty to set later)" "")
+    ;;
+  "Codex (OpenAI)")
+    AGENT_KEY_NAME="OPENAI_API_KEY"
+    info "You can find your API key at: https://platform.openai.com/api-keys"
+    AGENT_KEY_VALUE=$(ask "OpenAI API key (leave empty to set later)" "")
+    ;;
 esac
 
 cat > "$ROOT_DIR/.env" <<ENV_EOF
@@ -347,15 +441,15 @@ GITHUB_REPO=${GITHUB_REPO}
 GITHUB_PROJECT_NUMBER=
 PROJECT_TOKEN=
 DEPLOY_PROVIDER=${DEPLOY_PROVIDER_KEY}
-DEPLOY_TOKEN=
-DEPLOY_PROJECT_ID=
-MONITOR_DSN=
+DEPLOY_TOKEN=${DEPLOY_TOKEN}
+DEPLOY_PROJECT_ID=${DEPLOY_PROJECT_ID}
+MONITOR_DSN=${MONITOR_DSN}
 MONITOR_ENV=development
-${AGENT_KEY_LINE}
+$([ -n "$AGENT_KEY_NAME" ] && echo "${AGENT_KEY_NAME}=${AGENT_KEY_VALUE}")
 ENV_EOF
 ok "Created .env"
 
-# ── 5. Configure lint script ────────────────────────
+# ── 6. Configure lint script ────────────────────────
 if [ -n "$LINTER_CMD" ]; then
   cat > "$ROOT_DIR/scripts/checks/lint.sh" <<'LINT_HEADER'
 #!/usr/bin/env bash
@@ -389,7 +483,7 @@ LINT_BODY
   ok "Configured lint script: $LINTER_CMD"
 fi
 
-# ── 6. Configure test script ────────────────────────
+# ── 7. Configure test script ────────────────────────
 if [ -n "$TEST_CMD" ]; then
   cat > "$ROOT_DIR/scripts/checks/test.sh" <<TEST_EOF
 #!/usr/bin/env bash
@@ -420,7 +514,7 @@ TEST_EOF
   ok "Configured test script: $TEST_CMD"
 fi
 
-# ── 7. Configure CI workflow ─────────────────────────
+# ── 8. Configure CI workflow ─────────────────────────
 if [ -n "$CI_SETUP_STEPS" ]; then
   cat > "$ROOT_DIR/.github/workflows/ci.yml" <<CI_EOF
 name: CI
@@ -450,7 +544,7 @@ CI_EOF
   ok "Configured CI workflow"
 fi
 
-# ── 8. Configure setup.sh ───────────────────────────
+# ── 9. Configure setup.sh ───────────────────────────
 cat > "$ROOT_DIR/scripts/setup.sh" <<SETUP_EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -489,7 +583,7 @@ SETUP_TAIL
   chmod +x "$ROOT_DIR/scripts/setup.sh"
   ok "Configured setup script"
 
-# ── 9. Configure agent in WORKFLOW.md ─────────────────
+# ── 10. Configure agent in WORKFLOW.md ────────────────
 if [ "$AGENT_CHOICE" != "None / I'll configure later" ]; then
   WORKFLOW_FILE="$ROOT_DIR/WORKFLOW.md"
   if [ -f "$WORKFLOW_FILE" ]; then
@@ -512,7 +606,7 @@ if [ "$AGENT_CHOICE" != "None / I'll configure later" ]; then
   fi
 fi
 
-# ── 10. Create GitHub labels ────────────────────────
+# ── 11. Create GitHub labels ────────────────────────
 if [ "$CREATE_LABELS" = true ] && [ -n "$GITHUB_REPO" ]; then
   echo ""
   info "Creating labels on $GITHUB_REPO..."
@@ -527,7 +621,7 @@ if [ "$CREATE_LABELS" = true ] && [ -n "$GITHUB_REPO" ]; then
   gh label create "story"         --repo "$GITHUB_REPO" --color "C5DEF5" --description "User story"                      2>/dev/null && ok "Label: story"         || info "Label 'story' already exists"
 fi
 
-# ── 11. Initialize stack package manager ─────────────
+# ── 12. Initialize stack package manager ─────────────
 if [ -n "$PKG_INIT_CMD" ]; then
   echo ""
   if confirm "Initialize $STACK project scaffolding now?"; then
@@ -540,7 +634,7 @@ if [ -n "$PKG_INIT_CMD" ]; then
   fi
 fi
 
-# ── 12. Configure Symphony CI setup steps ────────────
+# ── 13. Configure Symphony CI setup steps ────────────
 if [ -n "$CI_SETUP_STEPS" ]; then
   SYMPHONY_FILE="$ROOT_DIR/.github/workflows/symphony.yml"
   if [ -f "$SYMPHONY_FILE" ]; then
@@ -566,6 +660,38 @@ if [ -n "$CI_SETUP_STEPS" ]; then
   fi
 fi
 
+# ── 14. Set up self-hosted runner ─────────────────────
+if [ "$SETUP_RUNNER" = true ]; then
+  echo ""
+  "$SCRIPT_DIR/runner/setup.sh" || warn "Runner setup had issues — you can retry with: make setup-runner"
+fi
+
+# ── 15. Commit and push ───────────────────────────────
+echo ""
+info "Committing configuration..."
+cd "$ROOT_DIR"
+git add -A
+git commit -m "Initialize project: ${PROJECT_NAME}
+
+Stack: ${STACK}
+Agent: ${AGENT_CHOICE}
+Deploy: ${DEPLOY_PROVIDER}
+Monitoring: ${MONITOR_CHOICE}"
+ok "Changes committed"
+
+if git remote get-url origin &>/dev/null; then
+  CURRENT_BRANCH=$(git branch --show-current)
+  info "Pushing to origin/${CURRENT_BRANCH}..."
+  if git push origin "$CURRENT_BRANCH"; then
+    ok "Pushed to origin/${CURRENT_BRANCH}"
+  else
+    warn "Push failed — you can push manually with: git push origin ${CURRENT_BRANCH}"
+  fi
+else
+  warn "No remote 'origin' configured — skipping push"
+  info "Add a remote and push manually: git remote add origin <url> && git push -u origin main"
+fi
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 header "Done!"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -576,6 +702,7 @@ echo -e "  Stack:      ${CYAN}${STACK}${RESET}"
 echo -e "  Agent:      ${CYAN}${AGENT_CHOICE}${RESET}"
 echo -e "  Deploy:     ${CYAN}${DEPLOY_PROVIDER}${RESET}"
 echo -e "  Monitoring: ${CYAN}${MONITOR_CHOICE}${RESET}"
+echo -e "  Runner:     ${CYAN}$([ "$SETUP_RUNNER" = true ] && echo "self-hosted (with fallback)" || echo "GitHub-hosted only")${RESET}"
 [ -n "$GITHUB_REPO" ] && echo -e "  GitHub:     ${CYAN}${GITHUB_REPO}${RESET}"
 echo ""
 

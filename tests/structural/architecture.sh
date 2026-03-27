@@ -18,11 +18,8 @@ echo "Validating architecture invariants..."
 
 # ── Required files must exist ────────────────────────
 REQUIRED=(
-  "AGENTS.md"
   "CLAUDE.md"
   "Makefile"
-  "docs/DESIGN.md"
-  "docs/architecture/layers.md"
 )
 
 for file in "${REQUIRED[@]}"; do

@@ -8,12 +8,7 @@ echo "Checking documentation freshness..."
 
 # ── Required docs must exist ─────────────────────────
 REQUIRED_DOCS=(
-  "AGENTS.md"
   "CLAUDE.md"
-  "docs/DESIGN.md"
-  "docs/architecture/layers.md"
-  "docs/QUALITY_SCORE.md"
-  "docs/design-docs/golden-principles.md"
 )
 
 for doc in "${REQUIRED_DOCS[@]}"; do

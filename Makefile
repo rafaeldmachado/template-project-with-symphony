@@ -1,6 +1,7 @@
 .PHONY: help init setup check lint test test-e2e structure worktree worktree-cleanup \
        gc gc-branches gc-worktrees gc-deploys gc-artifacts \
-       deploy-preview deploy-cleanup test-template
+       deploy-preview deploy-cleanup test-template \
+       setup-runner runner-start runner-stop runner-status runner-remove
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -96,6 +97,25 @@ ifndef PR
 	$(error PR is required. Usage: make deploy-cleanup PR=123)
 endif
 	@./scripts/deploy/pr-cleanup.sh $(PR)
+
+# ──────────────────────────────────────────────
+# Self-hosted runner
+# ──────────────────────────────────────────────
+
+setup-runner: ## Install and register a self-hosted GitHub Actions runner
+	@./scripts/runner/setup.sh
+
+runner-start: ## Start the self-hosted runner service
+	@./scripts/runner/manage.sh start
+
+runner-stop: ## Stop the self-hosted runner service
+	@./scripts/runner/manage.sh stop
+
+runner-status: ## Show self-hosted runner status
+	@./scripts/runner/manage.sh status
+
+runner-remove: ## Unregister and remove the self-hosted runner
+	@./scripts/runner/manage.sh remove
 
 # ──────────────────────────────────────────────
 # Template tests (validates the template itself)
