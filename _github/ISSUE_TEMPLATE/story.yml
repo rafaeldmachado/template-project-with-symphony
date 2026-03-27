@@ -1,0 +1,62 @@
+name: User Story
+description: A user story for agent-driven implementation
+title: "[Story]: "
+labels: ["story"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Structure this so an AI agent can implement it end-to-end without
+        asking questions. Include all context, constraints, and acceptance
+        criteria inline.
+
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: "As a [role], I want [capability] so that [benefit]."
+      placeholder: "As a user, I want to export my data as CSV so that I can analyze it in a spreadsheet."
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Detailed context. Reference relevant design docs or product specs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Every criterion must be testable. An agent will use these as a checklist.
+      placeholder: |
+        - [ ] Export button appears on the dashboard
+        - [ ] Clicking export downloads a .csv file with all user records
+        - [ ] CSV includes headers matching the API schema
+        - [ ] E2E test validates the export flow
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical_notes
+    attributes:
+      label: Technical notes
+      description: Architecture constraints, layer boundaries, dependencies.
+      placeholder: |
+        Layer: Services (export logic) + Runtime (API endpoint) + UI (button)
+        Use the existing CSV utility in core/utils/
+        Must not load all records into memory — stream the response
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Estimated size
+      options:
+        - Small (< 1 hour agent work)
+        - Medium (1-3 hours agent work)
+        - Large (3+ hours, consider breaking down)
+    validations:
+      required: true

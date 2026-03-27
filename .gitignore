@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.pyc
+target/
+_build/
+deps/
+
+# Build outputs
+dist/
+build/
+out/
+*.o
+*.so
+*.dylib
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.yaml
+
+# IDE and agent tool state
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test / coverage
+coverage/
+.nyc_output/
+htmlcov/
+.coverage
+
+# Worktrees (managed by scripts/worktree/)
+.worktrees/
+
+# PR deploy artifacts
+.deploy-artifacts/
+
+# Temporary
+tmp/
+.tmp/
+*.tmp

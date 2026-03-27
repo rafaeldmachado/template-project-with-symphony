@@ -1,0 +1,445 @@
+name: Symphony
+
+# Implements the Symphony spec (github.com/openai/symphony/blob/main/SPEC.md)
+# using GitHub Actions as the scheduler and GitHub Issues as the tracker.
+#
+# ALL configuration is read from WORKFLOW.md front matter at runtime.
+# Do not hardcode values here — edit WORKFLOW.md instead.
+#
+# The cycle:
+#   DISCOVER → CLAIM → WORKSPACE → HOOKS → PROMPT → EXECUTE → VALIDATE → DELIVER → RECONCILE
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to dispatch (leave empty for auto-discovery)'
+        required: false
+        type: string
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: symphony-dispatch
+  cancel-in-progress: false
+
+jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # DISCOVER — find eligible issues, load config
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  discover:
+    name: Discover eligible issues
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+      contents: read
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+      has_work: ${{ steps.find.outputs.has_work }}
+      agent_name: ${{ steps.config.outputs.agent_name }}
+      agent_model: ${{ steps.config.outputs.agent_model }}
+      agent_max_turns: ${{ steps.config.outputs.agent_max_turns }}
+      agent_max_budget: ${{ steps.config.outputs.agent_max_budget }}
+      max_concurrent: ${{ steps.config.outputs.max_concurrent }}
+      timeout_minutes: ${{ steps.config.outputs.timeout_minutes }}
+      hook_after_create: ${{ steps.config.outputs.hook_after_create }}
+      hook_before_run: ${{ steps.config.outputs.hook_before_run }}
+      hook_after_run: ${{ steps.config.outputs.hook_after_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            WORKFLOW.md
+            scripts/symphony
+
+      - name: Parse WORKFLOW.md config
+        id: config
+        run: |
+          chmod +x scripts/symphony/parse-config.sh
+          eval "$(./scripts/symphony/parse-config.sh)"
+
+          echo "agent_name=$SYMPHONY_AGENT" >> "$GITHUB_OUTPUT"
+          echo "agent_model=$SYMPHONY_AGENT_MODEL" >> "$GITHUB_OUTPUT"
+          echo "agent_max_turns=$SYMPHONY_AGENT_MAX_TURNS" >> "$GITHUB_OUTPUT"
+          echo "agent_max_budget=$SYMPHONY_AGENT_MAX_BUDGET" >> "$GITHUB_OUTPUT"
+          echo "max_concurrent=$SYMPHONY_MAX_CONCURRENT" >> "$GITHUB_OUTPUT"
+
+          # Hooks (base64 encoded to preserve newlines)
+          echo "hook_after_create=$SYMPHONY_HOOK_AFTER_CREATE" >> "$GITHUB_OUTPUT"
+          echo "hook_before_run=$SYMPHONY_HOOK_BEFORE_RUN" >> "$GITHUB_OUTPUT"
+          echo "hook_after_run=$SYMPHONY_HOOK_AFTER_RUN" >> "$GITHUB_OUTPUT"
+
+          # Convert timeout ms to minutes for GitHub Actions
+          TIMEOUT_MS="$SYMPHONY_AGENT_TIMEOUT_MS"
+          TIMEOUT_MIN=$(( (TIMEOUT_MS + 59999) / 60000 ))
+          echo "timeout_minutes=$TIMEOUT_MIN" >> "$GITHUB_OUTPUT"
+
+          echo "Config loaded from WORKFLOW.md:"
+          echo "  agent=$SYMPHONY_AGENT model=$SYMPHONY_AGENT_MODEL"
+          echo "  max_concurrent=$SYMPHONY_MAX_CONCURRENT timeout=${TIMEOUT_MIN}m"
+
+      - name: Find eligible issues
+        id: find
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SPECIFIC="${{ inputs.issue_number }}"
+          MAX="${{ steps.config.outputs.max_concurrent }}"
+
+          if [ -n "$SPECIFIC" ]; then
+            ISSUES=$(gh issue view "$SPECIFIC" \
+              --json number,title,body,labels \
+              --jq '[{number, title, body, labels: [.labels[].name]}]')
+          else
+            ISSUES=$(gh issue list \
+              --label "ready" \
+              --label "agent" \
+              --state open \
+              --limit "$MAX" \
+              --json number,title,body,labels \
+              --jq '[.[] | {number, title, body, labels: [.labels[].name]}]')
+          fi
+
+          # Sort by priority label: p0 > p1 > p2 > none
+          ISSUES=$(echo "$ISSUES" | jq '
+            [.[] | .priority = (
+              if (.labels | index("p0")) then 0
+              elif (.labels | index("p1")) then 1
+              elif (.labels | index("p2")) then 2
+              else 9 end
+            )] | sort_by(.priority, .number) | [.[] | del(.priority)]
+          ')
+
+          COUNT=$(echo "$ISSUES" | jq 'length')
+          echo "Discovered $COUNT eligible issue(s)"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "has_work=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+          else
+            echo "has_work=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=$(echo "$ISSUES" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # EXECUTE — one job per issue, full cycle
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  execute:
+    name: "#${{ matrix.number }} — ${{ matrix.title }}"
+    needs: discover
+    if: needs.discover.outputs.has_work == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJson(needs.discover.outputs.timeout_minutes) }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    strategy:
+      max-parallel: ${{ fromJson(needs.discover.outputs.max_concurrent) }}
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+
+    env:
+      AGENT_NAME: ${{ needs.discover.outputs.agent_name }}
+
+    steps:
+      # ── CLAIM ────────────────────────────────────────
+      - name: "Claim: mark #${{ matrix.number }} in-progress"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "ready" \
+            --add-label "in-progress"
+
+      # ── WORKSPACE ────────────────────────────────────
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Workspace: create branch"
+        run: |
+          BRANCH="issue/${{ matrix.number }}"
+          git checkout -b "$BRANCH" origin/main
+          git config user.name "symphony[bot]"
+          git config user.email "symphony[bot]@users.noreply.github.com"
+
+      # ── PROJECT SETUP ────────────────────────────────
+      # TODO: Uncomment for your stack (or use `make init` to configure)
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version: '22'
+      #     cache: 'npm'
+      # - run: npm ci
+
+      - name: "Workspace: run setup"
+        run: |
+          chmod +x scripts/setup.sh scripts/symphony/*.sh 2>/dev/null || true
+          make setup 2>/dev/null || true
+
+      # ── HOOK: after_create ──────────────────────────
+      - name: "Hook: after_create"
+        if: needs.discover.outputs.hook_after_create != ''
+        env:
+          ISSUE_NUMBER: ${{ matrix.number }}
+        run: |
+          echo "${{ needs.discover.outputs.hook_after_create }}" | base64 -d | bash || true
+
+      # ── HOOK: before_run ────────────────────────────
+      - name: "Hook: before_run"
+        if: needs.discover.outputs.hook_before_run != ''
+        env:
+          ISSUE_NUMBER: ${{ matrix.number }}
+        run: |
+          echo "${{ needs.discover.outputs.hook_before_run }}" | base64 -d | bash || true
+
+      # ── PROMPT ───────────────────────────────────────
+      - name: "Prompt: render WORKFLOW.md template"
+        id: prompt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1)
+          REPO=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f2)
+
+          # Fetch blocker relationships via GraphQL
+          BLOCKERS=$(gh api graphql -f query='
+            query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                issue(number: $number) {
+                  blockedBy(first: 20) {
+                    nodes { number title state }
+                  }
+                }
+              }
+            }' -f owner="$OWNER" -f repo="$REPO" -F number=${{ matrix.number }} \
+            --jq '[.data.repository.issue.blockedBy.nodes[] | {identifier: ("#" + (.number | tostring)), state: .state}]' 2>/dev/null || echo '[]')
+
+          echo "Blockers: $BLOCKERS"
+
+          LABELS=$(echo '${{ toJson(matrix.labels) }}' | jq -r 'join(",")')
+
+          RENDERED=$(./scripts/symphony/render-prompt.sh \
+            --number "${{ matrix.number }}" \
+            --title "${{ matrix.title }}" \
+            --body "${{ matrix.body }}" \
+            --labels "$LABELS" \
+            --blocked-by "$BLOCKERS" \
+            --attempt "")
+
+          echo "$RENDERED" > /tmp/symphony-prompt.md
+          echo "Prompt rendered: $(wc -l < /tmp/symphony-prompt.md) lines"
+
+      # ── EXECUTE: Claude Code ─────────────────────────
+      - name: "Execute: Claude Code"
+        if: env.AGENT_NAME == 'claude'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          MODEL="${{ needs.discover.outputs.agent_model }}"
+          MAX_TURNS="${{ needs.discover.outputs.agent_max_turns }}"
+          MAX_BUDGET="${{ needs.discover.outputs.agent_max_budget }}"
+
+          npm install -g @anthropic-ai/claude-code@latest
+
+          FLAGS=(-p "$(cat /tmp/symphony-prompt.md)")
+          FLAGS+=(--dangerously-skip-permissions)
+          FLAGS+=(--allowedTools "Bash,Read,Edit,Write,Glob,Grep")
+          FLAGS+=(--output-format json)
+
+          [ -n "$MODEL" ]      && FLAGS+=(--model "$MODEL")
+          [ -n "$MAX_TURNS" ]  && FLAGS+=(--max-turns "$MAX_TURNS")
+          [ -n "$MAX_BUDGET" ] && FLAGS+=(--max-budget-usd "$MAX_BUDGET")
+
+          echo "Running Claude Code (model=$MODEL, max_turns=$MAX_TURNS, budget=$MAX_BUDGET)..."
+          claude "${FLAGS[@]}" | tee /tmp/agent-output.json
+
+      # ── EXECUTE: Codex ───────────────────────────────
+      - name: "Execute: Codex"
+        if: env.AGENT_NAME == 'codex'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_QUIET_MODE: '1'
+        run: |
+          MODEL="${{ needs.discover.outputs.agent_model }}"
+
+          npm install -g @openai/codex@latest
+
+          FLAGS=(--full-auto --quiet)
+          [ -n "$MODEL" ] && FLAGS+=(--model "$MODEL")
+
+          echo "Running Codex (model=$MODEL, mode=full-auto)..."
+          codex "${FLAGS[@]}" "$(cat /tmp/symphony-prompt.md)" | tee /tmp/agent-output.json
+
+      # ── METRICS ──────────────────────────────────────
+      - name: "Metrics: parse agent output"
+        id: metrics
+        if: always()
+        run: |
+          INPUT_TOKENS="n/a"
+          OUTPUT_TOKENS="n/a"
+          TOTAL_COST="n/a"
+
+          if [ -f /tmp/agent-output.json ]; then
+            # Claude Code JSON output
+            INPUT_TOKENS=$(jq -r '
+              .usage.input_tokens //
+              .result.usage.input_tokens //
+              .input_tokens //
+              "n/a"' /tmp/agent-output.json 2>/dev/null || echo "n/a")
+            OUTPUT_TOKENS=$(jq -r '
+              .usage.output_tokens //
+              .result.usage.output_tokens //
+              .output_tokens //
+              "n/a"' /tmp/agent-output.json 2>/dev/null || echo "n/a")
+            TOTAL_COST=$(jq -r '
+              .cost_usd //
+              .result.cost_usd //
+              .usage.cost_usd //
+              "n/a"' /tmp/agent-output.json 2>/dev/null || echo "n/a")
+          fi
+
+          echo "input_tokens=$INPUT_TOKENS" >> "$GITHUB_OUTPUT"
+          echo "output_tokens=$OUTPUT_TOKENS" >> "$GITHUB_OUTPUT"
+          echo "total_cost=$TOTAL_COST" >> "$GITHUB_OUTPUT"
+
+          echo "Metrics: input=$INPUT_TOKENS output=$OUTPUT_TOKENS cost=\$$TOTAL_COST"
+
+      # ── HOOK: after_run ──────────────────────────────
+      - name: "Hook: after_run"
+        if: always() && needs.discover.outputs.hook_after_run != ''
+        env:
+          ISSUE_NUMBER: ${{ matrix.number }}
+        run: |
+          echo "${{ needs.discover.outputs.hook_after_run }}" | base64 -d | bash || true
+
+      # ── VALIDATE ─────────────────────────────────────
+      - name: "Validate: run checks"
+        id: validate
+        run: |
+          if make check 2>&1 | tee /tmp/check-output.txt; then
+            echo "checks_passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "checks_passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── DELIVER ──────────────────────────────────────
+      - name: "Deliver: push and open PR"
+        id: deliver
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="issue/${{ matrix.number }}"
+
+          if git diff --quiet HEAD origin/main; then
+            echo "No changes produced by agent."
+            echo "pr_created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git push -u origin "$BRANCH"
+
+          CHECKS_NOTE=""
+          if [ "${{ steps.validate.outputs.checks_passed }}" != "true" ]; then
+            CHECKS_NOTE=$'\n> **Warning:** `make check` had failures. Review CI output.\n'
+          fi
+
+          PR_URL=$(gh pr create \
+            --title "#${{ matrix.number }}: ${{ matrix.title }}" \
+            --body "$(cat <<'EOF'
+          ## Summary
+
+          Automated implementation of #${{ matrix.number }}.
+          ${{ steps.validate.outputs.checks_passed != 'true' && '> **Warning:** `make check` had failures. Review CI output.' || '' }}
+
+          ## Linked issue
+
+          Resolves #${{ matrix.number }}
+
+          ## Validation
+
+          | Metric | Value |
+          |--------|-------|
+          | Agent | `${{ needs.discover.outputs.agent_name }}` |
+          | Model | `${{ needs.discover.outputs.agent_model }}` |
+          | Checks | `${{ steps.validate.outputs.checks_passed }}` |
+          | Input tokens | `${{ steps.metrics.outputs.input_tokens }}` |
+          | Output tokens | `${{ steps.metrics.outputs.output_tokens }}` |
+          | Cost | `$${{ steps.metrics.outputs.total_cost }}` |
+          | Run | [logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+          ---
+          _Dispatched by [Symphony](${{ github.server_url }}/${{ github.repository }}/actions/workflows/symphony.yml)_
+          EOF
+          )" \
+            --head "$BRANCH" \
+            --base main 2>&1) || true
+
+          echo "PR: $PR_URL"
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "pr_created=true" >> "$GITHUB_OUTPUT"
+
+      # ── RECONCILE: success ───────────────────────────
+      - name: "Reconcile: move to human review"
+        if: steps.deliver.outputs.pr_created == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "in-progress" \
+            --add-label "human-review"
+
+          gh issue comment ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "**Symphony** created a PR: ${{ steps.deliver.outputs.pr_url }}
+
+          | Metric | Value |
+          |--------|-------|
+          | Agent | \`$AGENT_NAME\` |
+          | Model | \`${{ needs.discover.outputs.agent_model }}\` |
+          | Checks | \`${{ steps.validate.outputs.checks_passed }}\` |
+          | Input tokens | \`${{ steps.metrics.outputs.input_tokens }}\` |
+          | Output tokens | \`${{ steps.metrics.outputs.output_tokens }}\` |
+          | Cost | \`\$${{ steps.metrics.outputs.total_cost }}\` |
+          | Run | [logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+          Moving to **human-review**."
+
+      # ── RECONCILE: no changes ────────────────────────
+      - name: "Reconcile: no changes produced"
+        if: steps.deliver.outputs.pr_created != 'true' && success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "in-progress" \
+            --add-label "ready"
+
+          gh issue comment ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "**Symphony** ran \`$AGENT_NAME\` but no changes were produced.
+          Check that the agent is configured correctly and the issue description has enough context.
+          [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          Returning to **ready**."
+
+      # ── RECONCILE: failure ───────────────────────────
+      - name: "Reconcile: release on failure"
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "in-progress" \
+            --add-label "ready"
+
+          gh issue comment ${{ matrix.number }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "**Symphony** agent run **failed** for this issue.
+          [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          Returning to **ready** for retry on next poll cycle."

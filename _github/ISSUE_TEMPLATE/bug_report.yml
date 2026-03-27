@@ -1,0 +1,55 @@
+name: Bug Report
+description: Report a bug for an AI agent or human to fix
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provide enough detail for an agent to reproduce and fix this autonomously.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect?
+      placeholder: "When I do X, Y happens instead of Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps. An agent will follow these literally.
+      placeholder: |
+        1. Run `make dev`
+        2. Navigate to /settings
+        3. Click "Save" without changing anything
+        4. Observe error in console
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or errors
+      description: Paste ERROR lines, stack traces, or screenshots.
+      render: shell
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How do we know this is fixed? Be specific and testable.
+      placeholder: |
+        - [ ] Clicking "Save" with no changes shows no error
+        - [ ] Unit test covers the empty-save case

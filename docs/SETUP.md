@@ -1,0 +1,147 @@
+# Setup Guide
+
+How to configure this template for a new project.
+
+## Quick start (wizard)
+
+```bash
+git clone <this-repo-url> my-project
+cd my-project
+make init
+```
+
+The wizard walks you through choosing your stack, configuring GitHub, deploys,
+AI agent, and monitoring. It scaffolds the project, writes config files, and
+creates labels on your repo.
+
+After the wizard, run `make setup` to install dependencies, then `make check` to verify.
+
+## Manual setup
+
+If you prefer to configure things by hand, follow the steps below.
+
+### 1. Clone and initialize
+
+```bash
+git clone <this-repo-url> my-project
+cd my-project
+mv _github .github    # activate GitHub config (workflows, templates)
+make setup
+```
+
+The template stores GitHub config in `_github/` (without the dot) so workflows don't
+trigger on the template repo. Move it to `.github/` before doing anything else.
+(`make init` does this automatically.)
+
+`make setup` copies `.env.example` to `.env`, makes scripts executable, and creates
+working directories. Open `.env` and fill in the values relevant to you.
+
+## 2. Choose your stack
+
+The template is framework-agnostic. Wire in your language and tools:
+
+| File | What to configure |
+|------|-------------------|
+| `scripts/checks/lint.sh` | Uncomment/add your linter |
+| `scripts/checks/test.sh` | Uncomment/add your test runner |
+| `.github/workflows/ci.yml` | Uncomment the setup step for your runtime (after `make init`) |
+| `.github/workflows/symphony.yml` | Uncomment the setup step + one agent block (after `make init`) |
+
+## 3. Configure GitHub
+
+### Repository settings
+
+1. Go to **Settings > General > Features** and enable Issues and Projects.
+
+2. Go to **Settings > Actions > General**:
+   - Allow all actions
+   - Set workflow permissions to "Read and write permissions"
+   - Check "Allow GitHub Actions to create and approve pull requests"
+
+### Secrets and variables
+
+Go to **Settings > Secrets and variables > Actions**:
+
+**Secrets** (sensitive values):
+
+| Name | Required for | Value |
+|------|-------------|-------|
+| `PROJECT_TOKEN` | Project board sync | A PAT with `project` scope |
+| `DEPLOY_TOKEN` | PR preview deploys | Your deploy provider token |
+| `ANTHROPIC_API_KEY` | Symphony (Claude) | Your Anthropic API key |
+| `OPENAI_API_KEY` | Symphony (Codex) | Your OpenAI API key |
+
+Only add the secrets you need. Symphony needs exactly one agent key.
+
+**Variables** (non-sensitive):
+
+| Name | Required for | Value |
+|------|-------------|-------|
+| `GITHUB_PROJECT_NUMBER` | Project board sync | The number from your project URL |
+| `DEPLOY_PROVIDER` | PR preview deploys | `vercel`, `netlify`, `cloudflare`, `fly`, or `custom` |
+| `DEPLOY_PROJECT_ID` | PR preview deploys | Your deploy project/site ID |
+
+### GitHub Project board
+
+1. Go to your org or user's Projects tab and create a new project.
+2. Note the project number from the URL (e.g., `github.com/orgs/acme/projects/3` → `3`).
+3. Add it as the `GITHUB_PROJECT_NUMBER` variable above.
+4. Create a PAT at github.com/settings/tokens with `project` scope and add it
+   as the `PROJECT_TOKEN` secret.
+
+### Labels
+
+Create these labels in your repository (Settings > Labels):
+
+| Label | Color | Purpose |
+|-------|-------|---------|
+| `ready` | `#0E8A16` | Issue is ready for agent work |
+| `agent` | `#5319E7` | Issue should be handled by an AI agent |
+| `in-progress` | `#FBCA04` | Agent is working on it (set by Symphony) |
+| `human-review` | `#0075CA` | PR created, needs human review (set by Symphony) |
+| `p0` | `#B60205` | Critical priority (dispatched first) |
+| `p1` | `#D93F0B` | High priority |
+| `p2` | `#FBCA04` | Normal priority |
+| `bug` | `#D73A4A` | Bug report |
+| `enhancement` | `#A2EEEF` | Feature request |
+| `story` | `#C5DEF5` | User story |
+
+The first four are used by the Symphony workflow. Issues need both `ready` + `agent`
+to be picked up for autonomous work. Priority labels (`p0` > `p1` > `p2`) control
+dispatch order — issues without a priority label are dispatched last.
+
+## 4. Configure deploys (optional)
+
+See [DEPLOY.md](DEPLOY.md) for ephemeral PR preview setup.
+
+## 5. Start building
+
+### Manual mode (agent in your terminal)
+
+```bash
+make worktree ISSUE=1         # create isolated workspace
+cd .worktrees/1
+# ... work on the issue ...
+make check                    # validate
+git push -u origin issue/1    # push and open PR
+```
+
+### Autonomous mode (Symphony)
+
+1. Set `agent.name` to `claude` or `codex` in `WORKFLOW.md`
+2. Add the corresponding API key as a GitHub Actions secret
+3. Create an issue, add the `ready` + `agent` labels
+4. Symphony picks it up on the next poll and delivers a PR
+
+## 6. Define your architecture
+
+As you build, fill in:
+
+- `docs/DESIGN.md` — your domain map and system boundaries
+- `docs/architecture/layers.md` — is already set up with the standard layers
+- `docs/design-docs/` — add design docs for significant decisions
+- `docs/product-specs/` — add product specifications
+
+The structural tests in `tests/structural/` enforce the layer dependencies.
+When your project has a `src/` directory, uncomment the layer validation
+section in `tests/structural/architecture.sh`.

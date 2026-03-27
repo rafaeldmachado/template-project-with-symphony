@@ -1,0 +1,72 @@
+name: Garbage Collector
+
+on:
+  schedule:
+    # Runs daily at 04:00 UTC
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  gc-branches:
+    name: Clean stale branches
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Clean merged and stale branches
+        run: ./scripts/gc/clean-branches.sh
+        env:
+          DRY_RUN: 'false'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STALE_DAYS: 14
+
+  gc-deploys:
+    name: Clean orphaned deploys
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean orphaned PR deploys
+        run: ./scripts/gc/clean-deploys.sh
+        env:
+          DRY_RUN: 'false'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+
+  gc-artifacts:
+    name: Clean old artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean old CI artifacts
+        run: ./scripts/gc/clean-artifacts.sh
+        env:
+          DRY_RUN: 'false'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RETENTION_DAYS: 7
+
+  # ── Agent-driven garbage collection ─────────────────
+  # These jobs use AI agents to scan for code quality drift
+  # and open fix-up PRs. Uncomment when you have an agent configured.
+
+  # gc-doc-gardening:
+  #   name: Documentation freshness scan
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Scan for stale documentation
+  #       run: ./scripts/gc/doc-gardening.sh
+
+  # gc-quality-scan:
+  #   name: Quality score update
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Scan for pattern deviations
+  #       run: ./scripts/gc/quality-scan.sh

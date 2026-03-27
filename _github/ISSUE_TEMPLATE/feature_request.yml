@@ -1,0 +1,51 @@
+name: Feature Request
+description: Request a new feature or enhancement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write this as if briefing a new engineer. Everything the agent needs
+        should be in this issue — no external docs, no "ask someone".
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What should this feature do? Why does it matter?
+    validations:
+      required: true
+
+  - type: textarea
+    id: design
+    attributes:
+      label: Design notes
+      description: |
+        Which layers/domains does this touch? Any constraints?
+        Reference relevant docs (e.g., `docs/design-docs/...`).
+      placeholder: |
+        Touches: Services layer in the `auth` domain
+        Must not break existing session handling
+        See docs/design-docs/auth-flow.md
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Specific, testable conditions that must pass.
+      placeholder: |
+        - [ ] New endpoint POST /api/foo returns 201 with valid payload
+        - [ ] Integration test covers success and error cases
+        - [ ] Docs updated in docs/product-specs/
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: What should NOT be done as part of this issue?
+      placeholder: |
+        - Do not refactor existing endpoints
+        - Do not change the database schema
