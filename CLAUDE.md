@@ -40,6 +40,19 @@ make test-e2e       # e2e tests only
 make structure      # structural/architecture tests only
 ```
 
+### Self-hosted runner
+
+```bash
+make setup-runner   # install and register a self-hosted GitHub Actions runner
+make runner-status  # check if runner is online
+make runner-stop    # stop the runner service
+make runner-start   # start the runner service
+make runner-remove  # unregister and remove the runner
+```
+
+CI and Symphony workflows prefer the self-hosted runner when online, falling back
+to `ubuntu-latest` when offline. See [docs/SETUP.md](docs/SETUP.md) for details.
+
 All checks must pass before a PR can merge. The CI pipeline runs these automatically.
 
 ### PR workflow
@@ -70,6 +83,10 @@ make gc-artifacts   # clean old CI artifacts
 
 ## Conventions
 
+- **Docs are first-class.** Documentation is not an afterthought — it is part of the deliverable.
+  When you add a feature, fix a bug, or change behavior, update the relevant docs in the same PR.
+  This includes README.md, docs/, CLAUDE.md, AGENTS.md, and inline comments where the logic
+  isn't self-evident. Stale docs are worse than no docs.
 - **One concern per file.** Keep files focused and under 300 lines when possible.
 - **Grep-friendly errors.** Use `ERROR: [reason]` on single lines for easy parsing.
 - **File-based logging.** Prefer writing logs to files over flooding stdout.

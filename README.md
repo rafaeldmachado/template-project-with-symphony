@@ -25,7 +25,7 @@ an issue and delivers a pull request. Follow it in order.
 
 ### Prerequisites
 
-- Git and Bash (macOS/Linux)
+- Git and Bash (macOS, Linux, or Windows via Git Bash/WSL)
 - [GitHub CLI](https://cli.github.com/) (`gh`) — installed and authenticated
 - An AI agent: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) or [Codex](https://github.com/openai/codex)
 
@@ -37,16 +37,17 @@ cd my-project
 make init
 ```
 
-The wizard walks you through six screens:
+The wizard walks you through seven screens:
 
 | Screen | What it asks | What it does |
 |--------|-------------|--------------|
 | 1. Project basics | Name, description | Replaces template README, removes template files |
 | 2. Stack | Language/framework | Writes lint, test, and CI scripts for your stack |
-| 3. GitHub | Repo URL, labels | Creates Symphony labels on your repo |
-| 4. Deploys | Preview provider | Sets `DEPLOY_PROVIDER` in `.env` |
-| 5. AI Agent | Claude or Codex | Configures `WORKFLOW.md` and adds the API key placeholder to `.env` |
+| 3. GitHub | Repo URL, labels | Creates repo (if needed) and Symphony labels |
+| 4. Deploys | Preview provider | Sets `DEPLOY_PROVIDER` and token in `.env` |
+| 5. AI Agent | Claude or Codex | Configures `WORKFLOW.md` and API key in `.env` |
 | 6. Monitoring | Error tracker | Sets `MONITOR_DSN` in `.env` |
+| 7. Self-hosted runner | Use local machine for CI | Installs GitHub Actions runner, configures fallback |
 
 After the wizard finishes, the template's own `.github/` (CI for the template itself)
 is replaced with your project's GitHub config from `_github/`. Template files like
@@ -217,6 +218,11 @@ All automation runs through `make`. Do not run scripts directly.
 | `make gc` | Run all garbage collection |
 | `make deploy-preview PR=N` | Deploy PR preview |
 | `make deploy-cleanup PR=N` | Tear down PR preview |
+| `make setup-runner` | Install self-hosted GitHub Actions runner |
+| `make runner-start` | Start the runner service |
+| `make runner-stop` | Stop the runner service |
+| `make runner-status` | Show runner status |
+| `make runner-remove` | Unregister and remove the runner |
 
 ---
 
@@ -293,6 +299,7 @@ You don't have to use the whole template. Each piece works independently:
 | Symphony orchestration | `_github/workflows/symphony.yml` + `scripts/symphony/` + `WORKFLOW.md` |
 | Worktree isolation | `scripts/worktree/` + the `worktree` Makefile target |
 | Garbage collection | `scripts/gc/` + `_github/workflows/garbage-collector.yml` |
+| Self-hosted runner with fallback | `scripts/runner/` + the `pick-runner` job pattern from `ci.yml` |
 | Agent instructions pattern | Use `AGENTS.md` as a template — short entry point with pointers to deeper docs |
 
 ---
@@ -325,6 +332,7 @@ You don't have to use the whole template. Each piece works independently:
 │   ├── checks/                  # Lint, test, structure checks
 │   ├── deploy/                  # PR preview deploy/cleanup
 │   ├── gc/                      # Garbage collection
+│   ├── runner/                  # Self-hosted runner setup/management
 │   ├── symphony/                # Config parser, prompt renderer
 │   └── worktree/                # Worktree create/cleanup
 │

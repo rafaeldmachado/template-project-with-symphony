@@ -98,6 +98,12 @@ The workflow reads this at runtime — no need to edit symphony.yml.
 WORKFLOW.md run in both CI (Symphony) and local (`make worktree`) modes.
 Customize them to add project-specific setup or validation.
 
+**Runner**: Both CI and Symphony workflows include a `pick-runner` job that checks
+for an online self-hosted runner. If available, work runs locally on your machine (free).
+If not, it falls back to GitHub-hosted runners (`ubuntu-latest`). Set up a self-hosted
+runner with `make setup-runner`. See [SETUP.md](../SETUP.md#5-self-hosted-runner-optional)
+for details.
+
 See [symphony-spec.md](../symphony-spec.md) for how our implementation maps to the Symphony spec.
 
 ## Issue writing for agents

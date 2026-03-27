@@ -114,7 +114,64 @@ dispatch order — issues without a priority label are dispatched last.
 
 See [DEPLOY.md](DEPLOY.md) for ephemeral PR preview setup.
 
-## 5. Start building
+## 5. Self-hosted runner (optional)
+
+Use your own machine as a GitHub Actions runner to save CI minutes. When your machine
+is offline, jobs automatically fall back to GitHub-hosted runners (`ubuntu-latest`).
+
+### Quick setup (via wizard)
+
+The `make init` wizard offers this as step 7. If you skipped it, run:
+
+```bash
+make setup-runner
+```
+
+This downloads the GitHub Actions runner, registers it with your repo, and installs it
+as a background service.
+
+### How it works
+
+The runner **polls GitHub outbound over HTTPS** (port 443). No inbound ports, SSH, firewall
+rules, or static IP needed. It works behind NAT, corporate firewalls, and VPNs.
+
+The CI and Symphony workflows include a `pick-runner` job that checks whether a self-hosted
+runner is online. If one is available, the work runs there (free). If not, it falls back to
+`ubuntu-latest` (uses GitHub Actions minutes).
+
+### Supported platforms
+
+| Platform | Service type                | Auto-start                              |
+| -------- | --------------------------- | --------------------------------------- |
+| macOS    | LaunchAgent                 | On login                                |
+| Linux    | systemd user service        | On boot (with `loginctl enable-linger`) |
+| Windows  | Windows Service             | On boot (requires admin install)        |
+
+On Windows, use Git Bash, MSYS2, or WSL to run `make setup-runner`. The runner binary
+and service are native Windows — only the setup script uses Bash.
+
+### Managing the runner
+
+```bash
+make runner-status    # check if runner is online
+make runner-start     # start the service
+make runner-stop      # stop the service
+make runner-remove    # unregister and delete
+```
+
+### Network requirements
+
+The runner only needs **outbound HTTPS** to these hosts:
+
+- `github.com`
+- `api.github.com`
+- `*.actions.githubusercontent.com`
+- `*.blob.core.windows.net` (for caching)
+
+If you're behind a corporate proxy, set the `HTTPS_PROXY` environment variable
+before running `make setup-runner`.
+
+## 6. Start building
 
 ### Manual mode (agent in your terminal)
 
@@ -133,7 +190,7 @@ git push -u origin issue/1    # push and open PR
 3. Create an issue, add the `ready` + `agent` labels
 4. Symphony picks it up on the next poll and delivers a PR
 
-## 6. Define your architecture
+## 7. Define your architecture
 
 As you build, fill in:
 

@@ -113,6 +113,7 @@ See `docs/design-docs/golden-principles.md` for the full rationale behind each r
 1. Implement the changes described in the issue above.
 2. Follow the code quality rules above.
 3. Write or update tests. Match existing test patterns.
-4. Run `make check` and fix any failures.
-5. Commit with message: `#{{ issue.identifier }}: <what changed and why>`
-6. If acceptance criteria are listed in the issue, verify each one.
+4. Update docs if your changes affect behavior, commands, or configuration. Docs are first-class — README.md, docs/, CLAUDE.md, and AGENTS.md must stay accurate.
+5. Run `make check` and fix any failures.
+6. Commit with message: `#{{ issue.identifier }}: <what changed and why>`
+7. If acceptance criteria are listed in the issue, verify each one.
