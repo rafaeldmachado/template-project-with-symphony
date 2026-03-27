@@ -666,7 +666,24 @@ if [ "$SETUP_RUNNER" = true ]; then
   "$SCRIPT_DIR/runner/setup.sh" || warn "Runner setup had issues — you can retry with: make setup-runner"
 fi
 
-# ── 15. Commit and push ───────────────────────────────
+# ── 15. Update origin remote ──────────────────────────
+# The origin may still point to the template repo after cloning.
+# Update it to the project repo before committing and pushing.
+if [ -n "$GITHUB_REPO" ]; then
+  PROJECT_URL="https://github.com/${GITHUB_REPO}.git"
+  CURRENT_URL=$(git remote get-url origin 2>/dev/null || true)
+
+  if [ -n "$CURRENT_URL" ] && [ "$CURRENT_URL" != "$PROJECT_URL" ]; then
+    info "Updating origin remote: $CURRENT_URL → $PROJECT_URL"
+    git remote set-url origin "$PROJECT_URL"
+    ok "Origin remote updated to ${GITHUB_REPO}"
+  elif [ -z "$CURRENT_URL" ]; then
+    git remote add origin "$PROJECT_URL"
+    ok "Origin remote set to ${GITHUB_REPO}"
+  fi
+fi
+
+# ── 16. Commit and push ───────────────────────────────
 echo ""
 info "Committing configuration..."
 cd "$ROOT_DIR"
@@ -682,7 +699,7 @@ ok "Changes committed"
 if git remote get-url origin &>/dev/null; then
   CURRENT_BRANCH=$(git branch --show-current)
   info "Pushing to origin/${CURRENT_BRANCH}..."
-  if git push origin "$CURRENT_BRANCH"; then
+  if git push -u origin "$CURRENT_BRANCH"; then
     ok "Pushed to origin/${CURRENT_BRANCH}"
   else
     warn "Push failed — you can push manually with: git push origin ${CURRENT_BRANCH}"
