@@ -105,96 +105,389 @@ PROJECT_DESC=$(ask "One-line description" "")
 header "2/7  Stack"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-STACK=$(choose "Choose your stack:" \
-  "Node.js (TypeScript)" \
-  "Node.js (JavaScript)" \
-  "Python" \
-  "Go" \
-  "Rust" \
-  "Elixir" \
+STACK_CATEGORY=$(choose "Choose a category:" \
+  "Fullstack (unified — single framework handles front + back)" \
+  "Fullstack (split — separate backend and frontend)" \
+  "Backend / API only" \
+  "Frontend only" \
   "None / I'll configure later")
 
-case "$STACK" in
-  "Node.js (TypeScript)")
-    LINTER_CMD='npx eslint . --max-warnings 0 && npx prettier --check .'
-    FMT_CMD='npx prettier --write . && npx eslint . --fix'
-    TEST_CMD='npx vitest run'
-    E2E_CMD='npx playwright test'
-    SETUP_CMD='npm ci'
-    CI_SETUP_STEPS='      - uses: actions/setup-node@v4
+STACK=""
+BACKEND_STACK=""
+FRONTEND_STACK=""
+IS_FULLSTACK=false
+
+case "$STACK_CATEGORY" in
+  "Fullstack (unified — single framework handles front + back)")
+    STACK=$(choose "Choose a framework:" \
+      "Next.js (React)" \
+      "Nuxt (Vue)" \
+      "SvelteKit" \
+      "Remix" \
+      "Astro" \
+      "Rails" \
+      "Phoenix" \
+      "Django")
+    ;;
+  "Fullstack (split — separate backend and frontend)")
+    IS_FULLSTACK=true
+
+    info "Pick your backend API:"
+    BACKEND_STACK=$(choose "Backend:" \
+      "FastAPI" \
+      "Django" \
+      "Flask" \
+      "Hono (API)" \
+      "Express (TypeScript)" \
+      "Go" \
+      "Axum (API)" \
+      "Rails" \
+      "Phoenix" \
+      "Spring Boot (Kotlin)" \
+      "Spring Boot (Java)")
+
+    echo ""
+    info "Pick your frontend:"
+    FRONTEND_STACK=$(choose "Frontend:" \
+      "Next.js (React)" \
+      "SvelteKit" \
+      "Nuxt (Vue)" \
+      "Astro" \
+      "Remix")
+
+    STACK="${BACKEND_STACK} + ${FRONTEND_STACK}"
+    ;;
+  "Backend / API only")
+    STACK=$(choose "Choose a framework:" \
+      "FastAPI" \
+      "Django" \
+      "Flask" \
+      "Hono (API)" \
+      "Express (TypeScript)" \
+      "Go" \
+      "Axum (API)" \
+      "Rails" \
+      "Phoenix" \
+      "Spring Boot (Kotlin)" \
+      "Spring Boot (Java)" \
+      "Node.js (TypeScript, no framework)" \
+      "Node.js (JavaScript, no framework)" \
+      "Rust (no framework)" \
+      "Elixir (no framework)" \
+      "Ruby (no framework)" \
+      "Python (no framework)")
+    ;;
+  "Frontend only")
+    STACK=$(choose "Choose a framework:" \
+      "Next.js (React)" \
+      "SvelteKit" \
+      "Nuxt (Vue)" \
+      "Astro" \
+      "Remix")
+    ;;
+  *)
+    STACK="None"
+    ;;
+esac
+
+# ── Shared CI setup blocks ────────────────────────────
+NODE_CI_STEPS='      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
       - run: npm ci'
-    PKG_INIT_CMD='npm init -y && npm install -D typescript eslint prettier vitest @types/node && npx tsc --init'
-    ;;
-  "Node.js (JavaScript)")
-    LINTER_CMD='npx eslint . --max-warnings 0 && npx prettier --check .'
-    FMT_CMD='npx prettier --write . && npx eslint . --fix'
-    TEST_CMD='npx vitest run'
-    E2E_CMD='npx playwright test'
-    SETUP_CMD='npm ci'
-    CI_SETUP_STEPS='      - uses: actions/setup-node@v4
+
+PYTHON_CI_STEPS='      - uses: actions/setup-python@v5
         with:
-          node-version: "22"
-          cache: "npm"
-      - run: npm ci'
-    PKG_INIT_CMD='npm init -y && npm install -D eslint prettier vitest'
-    ;;
-  "Python")
-    LINTER_CMD='ruff check . && ruff format --check .'
-    FMT_CMD='ruff format . && ruff check . --fix'
-    TEST_CMD='pytest tests/ --ignore=tests/e2e'
-    E2E_CMD='pytest tests/e2e/'
-    SETUP_CMD='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
-    CI_SETUP_STEPS='      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: "pip"
       - run: pip install -r requirements.txt'
-    PKG_INIT_CMD='python -m venv .venv && source .venv/bin/activate && pip install ruff pytest && pip freeze > requirements.txt'
-    ;;
-  "Go")
-    LINTER_CMD='golangci-lint run ./...'
-    FMT_CMD='gofmt -w .'
-    TEST_CMD='go test ./...'
-    E2E_CMD='go test ./tests/e2e/...'
-    SETUP_CMD='go mod download'
-    CI_SETUP_STEPS='      - uses: actions/setup-go@v5
+
+GO_CI_STEPS='      - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.24"
       - run: go mod download'
-    PKG_INIT_CMD="go mod init github.com/\$(git remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||;s|\.git$||' || echo \"$PROJECT_NAME\")"
-    ;;
-  "Rust")
-    LINTER_CMD='cargo clippy -- -D warnings && cargo fmt -- --check'
-    FMT_CMD='cargo fmt'
-    TEST_CMD='cargo test'
-    E2E_CMD='cargo test --test e2e'
-    SETUP_CMD='cargo fetch'
-    CI_SETUP_STEPS='      - uses: dtolnay/rust-toolchain@stable
+
+RUST_CI_STEPS='      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - run: cargo fetch'
-    PKG_INIT_CMD='cargo init --name '"$PROJECT_NAME"
-    ;;
-  "Elixir")
-    LINTER_CMD='mix format --check-formatted && mix credo --strict'
-    FMT_CMD='mix format'
-    TEST_CMD='mix test'
-    E2E_CMD='mix test tests/e2e/'
-    SETUP_CMD='mix deps.get && mix compile'
-    CI_SETUP_STEPS='      - uses: erlef/setup-beam@v1
+
+ELIXIR_CI_STEPS='      - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
-          elixir-version: "1.17"
+          elixir-version: "1.18"
       - run: mix deps.get'
-    PKG_INIT_CMD='mix new . --app '"$PROJECT_NAME"
-    ;;
-  *)
-    info "Skipping stack setup. Configure scripts/checks/ manually later."
-    ;;
-esac
+
+RUBY_CI_STEPS='      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true'
+
+JAVA_CI_STEPS='      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          cache: "gradle"
+      - run: ./gradlew dependencies'
+
+# ── resolve_stack: sets _LINTER, _FMT, _TEST, _E2E, _SETUP, _CI, _PKG
+#    for a given framework name. Used for both single-stack and fullstack.
+resolve_stack() {
+  local fw="$1"
+  local prefix="${2:-}"  # optional dir prefix for fullstack (e.g., "backend/")
+
+  _LINTER="" _FMT="" _TEST="" _E2E="" _SETUP="" _CI="" _PKG=""
+
+  case "$fw" in
+    # ── JS/TS frameworks ─────────────────────────────
+    "Next.js (React)")
+      _LINTER='npx next lint && npx prettier --check .'
+      _FMT='npx prettier --write .'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npx create-next-app@latest . --ts --eslint --tailwind --app --src-dir --import-alias "@/*" --use-npm && npm install -D vitest @vitejs/plugin-react playwright'
+      ;;
+    "SvelteKit")
+      _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npx sv create . --template minimal --types ts --no-add-ons && npm install -D vitest playwright eslint prettier'
+      ;;
+    "Nuxt (Vue)")
+      _LINTER='npx nuxi typecheck && npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npx nuxi@latest init . --force && npm install -D vitest @nuxt/test-utils playwright eslint prettier'
+      ;;
+    "Astro")
+      _LINTER='npx astro check && npx prettier --check .'
+      _FMT='npx prettier --write .'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npm create astro@latest -- . --template minimal --typescript strict --install --no-git && npm install -D vitest playwright prettier'
+      ;;
+    "Remix")
+      _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npx create-remix@latest . --yes && npm install -D vitest playwright prettier'
+      ;;
+    "Hono (API)")
+      _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx vitest run tests/e2e'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npm create hono@latest . -- --template nodejs && npm install -D typescript eslint prettier vitest @types/node'
+      ;;
+    "Express (TypeScript)")
+      _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx vitest run tests/e2e'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npm init -y && npm install express && npm install -D typescript @types/express @types/node eslint prettier vitest tsx && npx tsc --init'
+      ;;
+    "Node.js (TypeScript, no framework)")
+      _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npm init -y && npm install -D typescript eslint prettier vitest @types/node && npx tsc --init'
+      ;;
+    "Node.js (JavaScript, no framework)")
+      _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
+      _FMT='npx prettier --write . && npx eslint . --fix'
+      _TEST='npx vitest run'
+      _E2E='npx playwright test'
+      _SETUP='npm ci'
+      _CI="$NODE_CI_STEPS"
+      _PKG='npm init -y && npm install -D eslint prettier vitest'
+      ;;
+
+    # ── Python frameworks ────────────────────────────
+    "FastAPI")
+      _LINTER='ruff check . && ruff format --check .'
+      _FMT='ruff format . && ruff check . --fix'
+      _TEST='pytest tests/ --ignore=tests/e2e'
+      _E2E='pytest tests/e2e/'
+      _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
+      _CI="$PYTHON_CI_STEPS"
+      _PKG='python -m venv .venv && source .venv/bin/activate && pip install fastapi uvicorn ruff pytest httpx && pip freeze > requirements.txt'
+      ;;
+    "Django")
+      _LINTER='ruff check . && ruff format --check .'
+      _FMT='ruff format . && ruff check . --fix'
+      _TEST='python manage.py test'
+      _E2E='pytest tests/e2e/'
+      _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
+      _CI="$PYTHON_CI_STEPS"
+      _PKG='python -m venv .venv && source .venv/bin/activate && pip install django ruff pytest && django-admin startproject config . && pip freeze > requirements.txt'
+      ;;
+    "Flask")
+      _LINTER='ruff check . && ruff format --check .'
+      _FMT='ruff format . && ruff check . --fix'
+      _TEST='pytest tests/ --ignore=tests/e2e'
+      _E2E='pytest tests/e2e/'
+      _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
+      _CI="$PYTHON_CI_STEPS"
+      _PKG='python -m venv .venv && source .venv/bin/activate && pip install flask ruff pytest && pip freeze > requirements.txt'
+      ;;
+    "Python (no framework)")
+      _LINTER='ruff check . && ruff format --check .'
+      _FMT='ruff format . && ruff check . --fix'
+      _TEST='pytest tests/ --ignore=tests/e2e'
+      _E2E='pytest tests/e2e/'
+      _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
+      _CI="$PYTHON_CI_STEPS"
+      _PKG='python -m venv .venv && source .venv/bin/activate && pip install ruff pytest && pip freeze > requirements.txt'
+      ;;
+
+    # ── Go ───────────────────────────────────────────
+    "Go")
+      _LINTER='golangci-lint run ./...'
+      _FMT='gofmt -w .'
+      _TEST='go test ./...'
+      _E2E='go test ./tests/e2e/...'
+      _SETUP='go mod download'
+      _CI="$GO_CI_STEPS"
+      _PKG="go mod init github.com/\$(git remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||;s|\.git\$||' || echo \"$PROJECT_NAME\")"
+      ;;
+
+    # ── Rust ─────────────────────────────────────────
+    "Axum (API)")
+      _LINTER='cargo clippy -- -D warnings && cargo fmt -- --check'
+      _FMT='cargo fmt'
+      _TEST='cargo test'
+      _E2E='cargo test --test e2e'
+      _SETUP='cargo fetch'
+      _CI="$RUST_CI_STEPS"
+      _PKG='cargo init --name '"$PROJECT_NAME"' && cargo add axum tokio --features tokio/full && cargo add -D tower-http'
+      ;;
+    "Rust (no framework)")
+      _LINTER='cargo clippy -- -D warnings && cargo fmt -- --check'
+      _FMT='cargo fmt'
+      _TEST='cargo test'
+      _E2E='cargo test --test e2e'
+      _SETUP='cargo fetch'
+      _CI="$RUST_CI_STEPS"
+      _PKG='cargo init --name '"$PROJECT_NAME"
+      ;;
+
+    # ── Elixir / Phoenix ─────────────────────────────
+    "Phoenix")
+      _LINTER='mix format --check-formatted && mix credo --strict'
+      _FMT='mix format'
+      _TEST='mix test'
+      _E2E='mix test tests/e2e/'
+      _SETUP='mix deps.get && mix compile'
+      _CI="$ELIXIR_CI_STEPS"
+      _PKG='mix archive.install hex phx_new --force && mix phx.new . --app '"$PROJECT_NAME"' --no-install && mix deps.get'
+      ;;
+    "Elixir (no framework)")
+      _LINTER='mix format --check-formatted && mix credo --strict'
+      _FMT='mix format'
+      _TEST='mix test'
+      _E2E='mix test tests/e2e/'
+      _SETUP='mix deps.get && mix compile'
+      _CI="$ELIXIR_CI_STEPS"
+      _PKG='mix new . --app '"$PROJECT_NAME"
+      ;;
+
+    # ── Ruby / Rails ─────────────────────────────────
+    "Rails")
+      _LINTER='bundle exec rubocop'
+      _FMT='bundle exec rubocop -A'
+      _TEST='bundle exec rails test'
+      _E2E='bundle exec rails test:system'
+      _SETUP='bundle install'
+      _CI="$RUBY_CI_STEPS"
+      _PKG='gem install rails && rails new . --name='"$PROJECT_NAME"' --skip-git --force && bundle add rubocop --group=development'
+      ;;
+    "Ruby (no framework)")
+      _LINTER='bundle exec rubocop'
+      _FMT='bundle exec rubocop -A'
+      _TEST='bundle exec rake test'
+      _E2E='bundle exec rake test:e2e'
+      _SETUP='bundle install'
+      _CI="$RUBY_CI_STEPS"
+      _PKG='bundle init && bundle add rubocop minitest --group=development'
+      ;;
+
+    # ── Java / Kotlin (Spring Boot) ──────────────────
+    "Spring Boot (Kotlin)")
+      _LINTER='./gradlew ktlintCheck'
+      _FMT='./gradlew ktlintFormat'
+      _TEST='./gradlew test'
+      _E2E='./gradlew e2eTest'
+      _SETUP='./gradlew dependencies'
+      _CI="$JAVA_CI_STEPS"
+      _PKG='curl -s "https://start.spring.io/starter.tgz?type=gradle-project-kotlin&language=kotlin&bootVersion=3.4.1&groupId=com.example&artifactId='"$PROJECT_NAME"'&dependencies=web,actuator" | tar -xzf - && gradle wrapper'
+      ;;
+    "Spring Boot (Java)")
+      _LINTER='./gradlew checkstyleMain checkstyleTest'
+      _FMT='./gradlew spotlessApply'
+      _TEST='./gradlew test'
+      _E2E='./gradlew e2eTest'
+      _SETUP='./gradlew dependencies'
+      _CI="$JAVA_CI_STEPS"
+      _PKG='curl -s "https://start.spring.io/starter.tgz?type=gradle-project&language=java&bootVersion=3.4.1&groupId=com.example&artifactId='"$PROJECT_NAME"'&dependencies=web,actuator" | tar -xzf - && gradle wrapper'
+      ;;
+  esac
+}
+
+# ── Apply stack configuration ─────────────────────────
+if [ "$IS_FULLSTACK" = true ]; then
+  # Resolve backend
+  resolve_stack "$BACKEND_STACK"
+  BE_LINTER="$_LINTER"; BE_FMT="$_FMT"; BE_TEST="$_TEST"; BE_E2E="$_E2E"
+  BE_SETUP="$_SETUP"; BE_CI="$_CI"; BE_PKG="$_PKG"
+
+  # Resolve frontend
+  resolve_stack "$FRONTEND_STACK"
+  FE_LINTER="$_LINTER"; FE_FMT="$_FMT"; FE_TEST="$_TEST"; FE_E2E="$_E2E"
+  FE_SETUP="$_SETUP"; FE_CI="$_CI"; FE_PKG="$_PKG"
+
+  # Combine: run each tool in its subdirectory
+  LINTER_CMD="(cd backend && ${BE_LINTER}) && (cd frontend && ${FE_LINTER})"
+  FMT_CMD="(cd backend && ${BE_FMT}) && (cd frontend && ${FE_FMT})"
+  TEST_CMD="(cd backend && ${BE_TEST}) && (cd frontend && ${FE_TEST})"
+  E2E_CMD="(cd backend && ${BE_E2E}) && (cd frontend && ${FE_E2E})"
+  SETUP_CMD="(cd backend && ${BE_SETUP}) && (cd frontend && ${FE_SETUP})"
+  PKG_INIT_CMD="mkdir -p backend frontend && (cd backend && ${BE_PKG}) && (cd frontend && ${FE_PKG})"
+
+  # Combine CI steps (deduplicate Node setup if both use it)
+  if [ "$BE_CI" = "$FE_CI" ]; then
+    CI_SETUP_STEPS="$BE_CI"
+  else
+    CI_SETUP_STEPS="${BE_CI}
+${FE_CI}"
+  fi
+elif [ "$STACK" != "None" ] && [ -n "$STACK" ]; then
+  resolve_stack "$STACK"
+  LINTER_CMD="$_LINTER"; FMT_CMD="$_FMT"; TEST_CMD="$_TEST"; E2E_CMD="$_E2E"
+  SETUP_CMD="$_SETUP"; CI_SETUP_STEPS="$_CI"; PKG_INIT_CMD="$_PKG"
+else
+  info "Skipping stack setup. Configure scripts/checks/ manually later."
+fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 header "3/7  GitHub"
