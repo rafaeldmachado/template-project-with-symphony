@@ -46,21 +46,28 @@ if ! gh auth status &>/dev/null; then
 fi
 
 # ── Network connectivity check ────────────────────────
+# Only test hosts that respond to HTTP probes. The runner also needs
+# *.actions.githubusercontent.com and *.blob.core.windows.net, but those
+# use WebSocket/long-poll and don't respond to plain HTTPS GET/HEAD.
 info "Checking network connectivity..."
 
-REQUIRED_HOSTS=(
-  "github.com"
-  "api.github.com"
-  "pipelines.actions.githubusercontent.com"
-)
-
 NET_OK=true
-for host in "${REQUIRED_HOSTS[@]}"; do
+for host in "github.com" "api.github.com"; do
   if curl -sf --max-time 5 "https://${host}" -o /dev/null 2>/dev/null || \
      curl -sf --max-time 5 -I "https://${host}" -o /dev/null 2>/dev/null; then
     ok "  $host — reachable"
   else
     warn "  $host — not reachable"
+    NET_OK=false
+  fi
+done
+
+# DNS-only check for hosts that don't respond to HTTP
+for host in "pipelines.actions.githubusercontent.com"; do
+  if host "$host" &>/dev/null || nslookup "$host" &>/dev/null 2>&1; then
+    ok "  $host — resolves"
+  else
+    warn "  $host — DNS lookup failed"
     NET_OK=false
   fi
 done
@@ -87,9 +94,17 @@ else
 fi
 
 # ── Detect repo ───────────────────────────────────────
-GITHUB_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
+# Prefer GITHUB_REPO from .env (set by make init) over git remote,
+# since the remote may still point to the template repo after cloning.
+GITHUB_REPO=""
+if [ -f "$ROOT_DIR/.env" ]; then
+  GITHUB_REPO=$(grep -E '^GITHUB_REPO=' "$ROOT_DIR/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '[:space:]' || true)
+fi
 if [ -z "$GITHUB_REPO" ]; then
-  fail "Could not detect GitHub repository. Make sure this is a git repo with a GitHub remote."
+  GITHUB_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
+fi
+if [ -z "$GITHUB_REPO" ]; then
+  fail "Could not detect GitHub repository. Run 'make init' first or set GITHUB_REPO in .env."
 fi
 
 echo ""
