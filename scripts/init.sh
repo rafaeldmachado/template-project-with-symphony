@@ -964,7 +964,17 @@ if [ -n "$PKG_INIT_CMD" ]; then
     # in a non-empty directory. Work around this by scaffolding into a temp
     # directory first, then merging generated files into the project root
     # without overwriting existing files.
-    SCAFFOLD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/scaffold-XXXXXX")
+    # Use the project name (lowercased, sanitized) as the temp dir name.
+    # Tools like create-next-app derive the npm package name from the directory
+    # name, and npm rejects uppercase letters.
+    SAFE_NAME=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]-' '-' | sed 's/^-//;s/-$//')
+    SCAFFOLD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/${SAFE_NAME:-scaffold}-XXXXXX")
+    # Rename the temp dir to use the clean project name (no random suffix)
+    SCAFFOLD_NAMED="${SCAFFOLD_DIR%/*}/${SAFE_NAME}"
+    if [ ! -d "$SCAFFOLD_NAMED" ]; then
+      mv "$SCAFFOLD_DIR" "$SCAFFOLD_NAMED"
+      SCAFFOLD_DIR="$SCAFFOLD_NAMED"
+    fi
     info "Scaffolding into temp directory..."
     info "Running: $PKG_INIT_CMD"
 
