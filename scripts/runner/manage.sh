@@ -124,7 +124,7 @@ case "$ACTION" in
       svc_cmd stop 2>/dev/null || true
       svc_cmd uninstall 2>/dev/null || true
 
-      REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --jq '.token' 2>/dev/null || true)
+      REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --method POST --jq '.token' 2>/dev/null || true)
       if [ -n "$REG_TOKEN" ]; then
         if [ "$OS" = "windows" ]; then
           cmd.exe /c "config.cmd remove --token $REG_TOKEN" 2>/dev/null || true

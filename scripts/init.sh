@@ -78,7 +78,6 @@ STACK=""
 LINTER_CMD=""
 TEST_CMD=""
 E2E_CMD=""
-FMT_CMD=""
 SETUP_CMD=""
 CI_SETUP_STEPS=""
 PKG_INIT_CMD=""
@@ -233,16 +232,15 @@ JAVA_CI_STEPS='      - uses: actions/setup-java@v4
 #    for a given framework name. Used for both single-stack and fullstack.
 resolve_stack() {
   local fw="$1"
-  local prefix="${2:-}"  # optional dir prefix for fullstack (e.g., "backend/")
 
   _LINTER="" _FMT="" _TEST="" _E2E="" _SETUP="" _CI="" _PKG=""
 
   case "$fw" in
     # ── JS/TS frameworks ─────────────────────────────
     "Next.js (React)")
-      _LINTER='npx next lint && npx prettier --check .'
+      _LINTER='npm run lint && npx prettier --check .'
       _FMT='npx prettier --write .'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -251,7 +249,7 @@ resolve_stack() {
     "SvelteKit")
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -260,7 +258,7 @@ resolve_stack() {
     "Nuxt (Vue)")
       _LINTER='npx nuxi typecheck && npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -269,7 +267,7 @@ resolve_stack() {
     "Astro")
       _LINTER='npx astro check && npx prettier --check .'
       _FMT='npx prettier --write .'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -278,7 +276,7 @@ resolve_stack() {
     "Remix")
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -287,7 +285,7 @@ resolve_stack() {
     "Hono (API)")
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx vitest run tests/e2e'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -296,7 +294,7 @@ resolve_stack() {
     "Express (TypeScript)")
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx vitest run tests/e2e'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -305,7 +303,7 @@ resolve_stack() {
     "Node.js (TypeScript, no framework)")
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -314,7 +312,7 @@ resolve_stack() {
     "Node.js (JavaScript, no framework)")
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
-      _TEST='npx vitest run'
+      _TEST='npx vitest run --passWithNoTests'
       _E2E='npx playwright test'
       _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
@@ -325,7 +323,7 @@ resolve_stack() {
     "FastAPI")
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
-      _TEST='pytest tests/ --ignore=tests/e2e'
+      _TEST='pytest tests/ --ignore=tests/e2e || [ $? -eq 5 ]'
       _E2E='pytest tests/e2e/'
       _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
       _CI="$PYTHON_CI_STEPS"
@@ -343,7 +341,7 @@ resolve_stack() {
     "Flask")
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
-      _TEST='pytest tests/ --ignore=tests/e2e'
+      _TEST='pytest tests/ --ignore=tests/e2e || [ $? -eq 5 ]'
       _E2E='pytest tests/e2e/'
       _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
       _CI="$PYTHON_CI_STEPS"
@@ -352,7 +350,7 @@ resolve_stack() {
     "Python (no framework)")
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
-      _TEST='pytest tests/ --ignore=tests/e2e'
+      _TEST='pytest tests/ --ignore=tests/e2e || [ $? -eq 5 ]'
       _E2E='pytest tests/e2e/'
       _SETUP='python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'
       _CI="$PYTHON_CI_STEPS"
@@ -466,7 +464,6 @@ if [ "$IS_FULLSTACK" = true ]; then
 
   # Combine: run each tool in its subdirectory
   LINTER_CMD="(cd backend && ${BE_LINTER}) && (cd frontend && ${FE_LINTER})"
-  FMT_CMD="(cd backend && ${BE_FMT}) && (cd frontend && ${FE_FMT})"
   TEST_CMD="(cd backend && ${BE_TEST}) && (cd frontend && ${FE_TEST})"
   E2E_CMD="(cd backend && ${BE_E2E}) && (cd frontend && ${FE_E2E})"
   SETUP_CMD="(cd backend && ${BE_SETUP}) && (cd frontend && ${FE_SETUP})"
@@ -481,7 +478,7 @@ ${FE_CI}"
   fi
 elif [ "$STACK" != "None" ] && [ -n "$STACK" ]; then
   resolve_stack "$STACK"
-  LINTER_CMD="$_LINTER"; FMT_CMD="$_FMT"; TEST_CMD="$_TEST"; E2E_CMD="$_E2E"
+  LINTER_CMD="$_LINTER"; TEST_CMD="$_TEST"; E2E_CMD="$_E2E"
   SETUP_CMD="$_SETUP"; CI_SETUP_STEPS="$_CI"; PKG_INIT_CMD="$_PKG"
 else
   info "Skipping stack setup. Configure scripts/checks/ manually later."
@@ -491,7 +488,6 @@ fi
 header "3/7  GitHub"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SETUP_GITHUB=false
 GITHUB_REPO=""
 CREATE_LABELS=false
 
@@ -499,8 +495,6 @@ CREATE_REPO=false
 
 if command -v gh &>/dev/null; then
   if confirm "Configure GitHub integration?"; then
-    SETUP_GITHUB=true
-
     # Detect current remote as default, but always let user override
     DETECTED_REPO=""
     if DETECTED_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>&1); then
@@ -805,14 +799,25 @@ if [ "\${1:-}" = "--e2e" ]; then
   E2E=true
 fi
 
+# Check if any test files exist (common patterns across frameworks)
+has_tests() {
+  local dir="\${1:-.}"
+  find "\$dir" -type f \\( \
+    -name "*.test.*" -o -name "*.spec.*" -o -name "*_test.*" -o \
+    -name "test_*" -o -name "*Test.*" -o -name "*_test.go" \
+  \\) 2>/dev/null | head -1 | grep -q .
+}
+
 echo "Running tests..."
 
 if [ "\$E2E" = true ]; then
   echo "  Running e2e tests..."
   ${E2E_CMD}
-else
+elif has_tests; then
   echo "  Running unit + integration tests..."
   ${TEST_CMD}
+else
+  echo "  No test files found — skipping (write tests in tests/)"
 fi
 
 echo "Tests complete."
@@ -1019,6 +1024,34 @@ if [ -n "$PKG_INIT_CMD" ]; then
       if [ -d "$SCAFFOLD_DIR/gradle" ]; then
         cp -r "$SCAFFOLD_DIR/gradle" "$ROOT_DIR/"
       fi
+
+      # Merge knowledge files: if the scaffold generated docs that also exist
+      # in the project (AGENTS.md, CLAUDE.md, README.md), append the scaffold's
+      # content as a framework-specific section instead of discarding it.
+      FRAMEWORK_LABEL="$STACK"
+      [ "$IS_FULLSTACK" = true ] && FRAMEWORK_LABEL="$BACKEND_STACK + $FRONTEND_STACK"
+
+      for doc in AGENTS.md CLAUDE.md README.md; do
+        SCAFFOLD_DOC="$SCAFFOLD_DIR/$doc"
+        PROJECT_DOC="$ROOT_DIR/$doc"
+        if [ -f "$SCAFFOLD_DOC" ] && [ -f "$PROJECT_DOC" ]; then
+          # Only append if the scaffold version has meaningful content
+          SCAFFOLD_LINES=$(wc -l < "$SCAFFOLD_DOC" | tr -d ' ')
+          if [ "$SCAFFOLD_LINES" -gt 2 ]; then
+            {
+              echo ""
+              echo "---"
+              echo ""
+              echo "## ${FRAMEWORK_LABEL} — framework notes"
+              echo ""
+              echo "> Merged from scaffold-generated \`${doc}\`."
+              echo ""
+              cat "$SCAFFOLD_DOC"
+            } >> "$PROJECT_DOC"
+            ok "Merged scaffold ${doc} into project ${doc}"
+          fi
+        fi
+      done
     else
       echo ""
       fail "Scaffolding failed (exit code $SCAFFOLD_EXIT). Check the output above."

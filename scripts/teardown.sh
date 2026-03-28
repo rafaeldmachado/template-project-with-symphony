@@ -20,7 +20,6 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BOLD='\033[1m'
 DIM='\033[2m'
 GREEN='\033[0;32m'
-CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 RESET='\033[0m'
@@ -75,7 +74,7 @@ if [ -n "$REPO_SLUG" ] && [ -d "$RUNNER_DIR" ]; then
     # Unregister from GitHub
     if [ -n "$GITHUB_REPO" ] && command -v gh &>/dev/null; then
       REG_TOKEN=""
-      REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --jq '.token' 2>/dev/null || true)
+      REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --method POST --jq '.token' 2>/dev/null || true)
       if [ -n "$REG_TOKEN" ] && [ -f "$RUNNER_DIR/config.sh" ]; then
         (cd "$RUNNER_DIR" && ./config.sh remove --token "$REG_TOKEN" 2>/dev/null || true)
       fi
@@ -132,12 +131,10 @@ fi
 echo ""
 if confirm "Remove local init artifacts (.env, generated scripts, .github/)?"; then
   # Remove generated files
-  for f in .env; do
-    if [ -f "$ROOT_DIR/$f" ]; then
-      rm "$ROOT_DIR/$f"
-      ok "Removed $f"
-    fi
-  done
+  if [ -f "$ROOT_DIR/.env" ]; then
+    rm "$ROOT_DIR/.env"
+    ok "Removed .env"
+  fi
 
   # Remove .github/ (was moved from _github/ during init)
   if [ -d "$ROOT_DIR/.github" ] && [ ! -d "$ROOT_DIR/_github" ]; then
@@ -156,8 +153,8 @@ if confirm "Remove local init artifacts (.env, generated scripts, .github/)?"; t
 
   # Remove generated directories
   for d in .worktrees .deploy-artifacts; do
-    if [ -d "$ROOT_DIR/$d" ]; then
-      rm -rf "$ROOT_DIR/$d"
+    if [ -d "${ROOT_DIR:?}/$d" ]; then
+      rm -rf "${ROOT_DIR:?}/$d"
       ok "Removed $d/"
     fi
   done

@@ -63,14 +63,13 @@ for host in "github.com" "api.github.com"; do
 done
 
 # DNS-only check for hosts that don't respond to HTTP
-for host in "pipelines.actions.githubusercontent.com"; do
-  if host "$host" &>/dev/null || nslookup "$host" &>/dev/null 2>&1; then
-    ok "  $host — resolves"
-  else
-    warn "  $host — DNS lookup failed"
-    NET_OK=false
-  fi
-done
+DNS_HOST="pipelines.actions.githubusercontent.com"
+if host "$DNS_HOST" &>/dev/null || nslookup "$DNS_HOST" &>/dev/null 2>&1; then
+  ok "  $DNS_HOST — resolves"
+else
+  warn "  $DNS_HOST — DNS lookup failed"
+  NET_OK=false
+fi
 
 if [ "$NET_OK" = false ]; then
   echo ""
@@ -190,7 +189,7 @@ if [ -d "$RUNNER_DIR" ]; then
       exit 0
     fi
     # Unconfigure before reconfiguring
-    REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --jq '.token' 2>/dev/null || true)
+    REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --method POST --jq '.token' 2>/dev/null || true)
     if [ -n "$REG_TOKEN" ]; then
       if [ "$OS" = "windows" ]; then
         (cd "$RUNNER_DIR" && cmd.exe /c "config.cmd remove --token $REG_TOKEN") 2>/dev/null || true
@@ -250,7 +249,7 @@ fi
 
 # ── Get registration token ───────────────────────────
 info "Requesting registration token..."
-REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --jq '.token')
+REG_TOKEN=$(gh api "repos/${GITHUB_REPO}/actions/runners/registration-token" --method POST --jq '.token')
 
 if [ -z "$REG_TOKEN" ]; then
   fail "Failed to get registration token. Ensure you have admin access to $GITHUB_REPO."
