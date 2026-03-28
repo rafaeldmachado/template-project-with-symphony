@@ -41,15 +41,9 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-GITHUB_REPO=""
-if [ -f "$ROOT_DIR/.env" ]; then
-  GITHUB_REPO=$(grep -E '^GITHUB_REPO=' "$ROOT_DIR/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '[:space:]' || true)
-fi
+GITHUB_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
 if [ -z "$GITHUB_REPO" ]; then
-  GITHUB_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
-fi
-if [ -z "$GITHUB_REPO" ]; then
-  fail "Could not detect GitHub repository. Run 'make init' first or set GITHUB_REPO in .env."
+  fail "Could not detect GitHub repository. Run 'make init' first or add a git remote."
 fi
 
 REPO_SLUG="$(echo "$GITHUB_REPO" | tr '/' '-')"

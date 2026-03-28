@@ -1,5 +1,8 @@
 name: Sync Issues to GitHub Project
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   issues:
     types: [opened, edited, labeled, unlabeled, assigned, closed, reopened]
@@ -7,46 +10,97 @@ on:
     types: [opened, closed, reopened, ready_for_review, converted_to_draft]
 
 jobs:
-  sync-issue:
-    name: Sync issue to project board
-    if: github.event_name == 'issues' && vars.PROJECT_URL != ''
+  sync:
+    name: Sync to project board
+    if: vars.PROJECT_URL != ''
     runs-on: ubuntu-latest
     permissions:
       issues: read
-      repository-projects: write
-    steps:
-      - name: Add issue to project
-        uses: actions/add-to-project@v1.0.2
-        with:
-          project-url: ${{ vars.PROJECT_URL }}
-          github-token: ${{ secrets.PROJECT_TOKEN }}
-
-  sync-pr:
-    name: Sync PR to project board
-    if: github.event_name == 'pull_request' && vars.PROJECT_URL != ''
-    runs-on: ubuntu-latest
-    permissions:
       pull-requests: read
       repository-projects: write
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      PROJECT_OWNER: ${{ github.repository_owner }}
+      PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
     steps:
-      - name: Add PR to project
+      - name: Add item to project
+        id: add
         uses: actions/add-to-project@v1.0.2
         with:
           project-url: ${{ vars.PROJECT_URL }}
           github-token: ${{ secrets.PROJECT_TOKEN }}
 
-  update-status:
-    name: Update project item status
-    if: (github.event.action == 'closed' || github.event.action == 'reopened') && vars.PROJECT_URL != ''
-    runs-on: ubuntu-latest
-    permissions:
-      issues: read
-      repository-projects: write
-    steps:
-      - name: Update status via GitHub CLI
+      - name: Determine target status
+        id: status
         run: |
-          echo "TODO: Use gh project item-edit to update status field"
-          echo "This requires PROJECT_TOKEN with project scope"
-          echo "Event: ${{ github.event.action }}"
+          EVENT="${{ github.event_name }}"
+          ACTION="${{ github.event.action }}"
+
+          # Map labels / events → project column
+          # Label priority: closed > in-progress > human-review > ready > default
+          if [ "$EVENT" = "issues" ]; then
+            LABELS='${{ toJson(github.event.issue.labels.*.name) }}'
+            IS_CLOSED="${{ github.event.issue.state == 'closed' }}"
+          else
+            LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+            IS_CLOSED="${{ github.event.pull_request.state == 'closed' }}"
+          fi
+
+          if [ "$IS_CLOSED" = "true" ] || [ "$ACTION" = "closed" ]; then
+            echo "column=Done" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"in-progress"'; then
+            echo "column=In Progress" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"human-review"'; then
+            echo "column=Under Review" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"ready"'; then
+            echo "column=Ready" >> "$GITHUB_OUTPUT"
+          elif [ "$ACTION" = "reopened" ]; then
+            echo "column=Ready" >> "$GITHUB_OUTPUT"
+          elif [ "$ACTION" = "opened" ]; then
+            echo "column=Backlog" >> "$GITHUB_OUTPUT"
+          else
+            echo "column=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update project status
+        if: steps.status.outputs.column != ''
         env:
-          GITHUB_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          ITEM_ID: ${{ steps.add.outputs.itemId }}
+          TARGET_COLUMN: ${{ steps.status.outputs.column }}
+        run: |
+          # Get project ID and Status field metadata
+          PROJECT_DATA=$(gh project field-list "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" --format json 2>/dev/null || echo '{"fields":[]}')
+
+          STATUS_FIELD_ID=$(echo "$PROJECT_DATA" | jq -r '.fields[] | select(.name == "Status") | .id')
+
+          if [ -z "$STATUS_FIELD_ID" ] || [ "$STATUS_FIELD_ID" = "null" ]; then
+            echo "::warning::Status field not found in project — skipping status update"
+            exit 0
+          fi
+
+          OPTION_ID=$(echo "$PROJECT_DATA" | jq -r \
+            --arg col "$TARGET_COLUMN" \
+            '.fields[] | select(.name == "Status") | .options[]? | select(.name == $col) | .id')
+
+          if [ -z "$OPTION_ID" ] || [ "$OPTION_ID" = "null" ]; then
+            echo "::warning::Column '$TARGET_COLUMN' not found in Status field — skipping"
+            exit 0
+          fi
+
+          # Get the project's global ID (needed for item-edit)
+          PROJECT_ID=$(gh project view "$PROJECT_NUMBER" \
+            --owner "$PROJECT_OWNER" --format json --jq '.id' 2>/dev/null || true)
+
+          if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
+            echo "::warning::Could not resolve project ID — skipping status update"
+            exit 0
+          fi
+
+          gh project item-edit \
+            --id "$ITEM_ID" \
+            --project-id "$PROJECT_ID" \
+            --field-id "$STATUS_FIELD_ID" \
+            --single-select-option-id "$OPTION_ID" 2>&1 && \
+            echo "Moved to '$TARGET_COLUMN'" || \
+            echo "::warning::Failed to update status to '$TARGET_COLUMN'"

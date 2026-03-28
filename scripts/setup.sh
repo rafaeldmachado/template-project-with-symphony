@@ -13,12 +13,6 @@ find "$ROOT_DIR/scripts" -name "*.sh" -exec chmod +x {} \;
 mkdir -p "$ROOT_DIR/.worktrees"
 mkdir -p "$ROOT_DIR/.deploy-artifacts"
 
-# ── Copy environment template if needed ──────────────
-if [ ! -f "$ROOT_DIR/.env" ] && [ -f "$ROOT_DIR/.env.example" ]; then
-  cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
-  echo "Created .env from .env.example — fill in your values."
-fi
-
 # ── Project-specific setup ───────────────────────────
 # TODO: Add your dependency installation here. Examples:
 #

@@ -46,8 +46,9 @@ hooks:
     make setup 2>/dev/null || true
   before_run: |
     git pull --rebase origin main 2>/dev/null || true
-  after_run: |
-    make check 2>/dev/null || true
+  # after_run runs before the built-in validate step (which already runs make check).
+  # Use this hook for custom post-agent cleanup, not redundant checks.
+  after_run: ""
 
 # ── Agent ──────────────────────────────────────────────
 # Which coding agent to dispatch and concurrency limits.
@@ -102,7 +103,7 @@ Do not repeat the same steps that failed.
 - **Parse at the boundary** — validate data shapes at entry points, not inline.
 - **Grep-friendly errors**: `ERROR: [module] description` on single lines.
 - **Structured logging** — JSON or key=value, never bare strings. Prefer file-based logging.
-- **No secrets in code** — use `.env` or environment variables.
+- **No secrets in code** — use environment variables or repo secrets.
 - **Solve the stated problem, nothing more** — no config options, abstractions, or extension points the issue doesn't ask for. Three similar lines beat a premature abstraction.
 - **Prefer the obvious path** — pick the approach that's easier to read and delete. Avoid clever indirection when a flat implementation works.
 

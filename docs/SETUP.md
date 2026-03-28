@@ -11,8 +11,9 @@ make init
 ```
 
 The wizard walks you through choosing your stack, configuring GitHub, deploys,
-AI agent, and monitoring. It scaffolds the project, writes config files, and
-creates labels on your repo.
+AI agent, and monitoring. It scaffolds the project, writes config files,
+creates labels, sets up a project board with status columns, configures
+repository permissions, and stores secrets — all automatically.
 
 After the wizard, run `make setup` to install dependencies, then `make check` to verify.
 
@@ -33,8 +34,7 @@ The template stores GitHub config in `_github/` (without the dot) so workflows d
 trigger on the template repo. Move it to `.github/` before doing anything else.
 (`make init` does this automatically.)
 
-`make setup` copies `.env.example` to `.env`, makes scripts executable, and creates
-working directories. Open `.env` and fill in the values relevant to you.
+`make setup` makes scripts executable and creates working directories.
 
 ## 2. Choose your stack
 
@@ -48,6 +48,10 @@ The template is framework-agnostic. Wire in your language and tools:
 | `.github/workflows/symphony.yml` | Uncomment the setup step + one agent block (after `make init`) |
 
 ## 3. Configure GitHub
+
+> **Note:** `make init` handles all of the below automatically — repository settings,
+> secrets, variables, project board, and labels. These manual steps are only needed
+> if you skipped the GitHub step during the wizard.
 
 ### Repository settings
 
@@ -66,12 +70,15 @@ Go to **Settings > Secrets and variables > Actions**:
 
 | Name | Required for | Value |
 |------|-------------|-------|
-| `PROJECT_TOKEN` | Project board sync | A PAT with `project` scope |
+| `PROJECT_TOKEN` | Project board sync | A PAT with `project` scope (auto-set by wizard) |
 | `DEPLOY_TOKEN` | PR preview deploys | Your deploy provider token |
-| `ANTHROPIC_API_KEY` | Symphony (Claude) | Your Anthropic API key |
+| `ANTHROPIC_API_KEY` | Symphony (Claude, API key) | Your Anthropic Console API key |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Symphony (Claude, OAuth) | Token from `claude setup-token` (Max/Teams/Enterprise) |
 | `OPENAI_API_KEY` | Symphony (Codex) | Your OpenAI API key |
 
 Only add the secrets you need. Symphony needs exactly one agent key.
+For Claude Code, choose either `ANTHROPIC_API_KEY` (Console API) or
+`CLAUDE_CODE_OAUTH_TOKEN` (Max/Teams/Enterprise subscription) — not both.
 
 **Variables** (non-sensitive):
 
@@ -84,15 +91,25 @@ Only add the secrets you need. Symphony needs exactly one agent key.
 
 ### GitHub Project board
 
+> The wizard creates the project board automatically with Status columns
+> (`Backlog`, `Ready`, `In Progress`, `Under Review`, `Done`), sets
+> `PROJECT_URL` and `PROJECT_NUMBER` as repo variables, and stores
+> `PROJECT_TOKEN` as a repo secret.
+
+If setting up manually:
+
 1. Go to your org or user's Projects tab and create a new project.
-2. Note the project number from the URL (e.g., `github.com/orgs/acme/projects/3` → `3`).
-3. Add `PROJECT_URL` (full URL) and `PROJECT_NUMBER` as repo variables.
-4. Create a PAT at github.com/settings/tokens with `project` scope and add it
+2. Add Status columns: `Backlog`, `Ready`, `In Progress`, `Under Review`, `Done`.
+3. Note the project number from the URL (e.g., `github.com/orgs/acme/projects/3` → `3`).
+4. Add `PROJECT_URL` (full URL) and `PROJECT_NUMBER` as repo variables.
+5. Create a PAT at github.com/settings/tokens with `project` scope and add it
    as the `PROJECT_TOKEN` secret.
 
 ### Labels
 
-Create these labels in your repository (Settings > Labels):
+> The wizard creates all required labels automatically.
+
+If setting up manually, create these labels (Settings > Labels):
 
 | Label | Color | Purpose |
 |-------|-------|---------|
@@ -187,7 +204,7 @@ git push -u origin issue/1    # push and open PR
 ### Autonomous mode (Symphony)
 
 1. Set `agent.name` to `claude` or `codex` in `WORKFLOW.md`
-2. Add the corresponding API key as a GitHub Actions secret
+2. Add the corresponding secret (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or `OPENAI_API_KEY`) — the wizard does this automatically
 3. Create an issue, add the `ready` + `agent` labels
 4. Symphony picks it up on the next poll and delivers a PR
 

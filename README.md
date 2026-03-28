@@ -43,10 +43,10 @@ The wizard walks you through seven screens:
 |--------|-------------|--------------|
 | 1. Project basics | Name, description | Replaces template README, removes template files |
 | 2. Stack | Language/framework | Writes lint, test, and CI scripts for your stack |
-| 3. GitHub | Repo URL, labels | Creates repo (if needed) and Symphony labels |
-| 4. Deploys | Preview provider | Sets `DEPLOY_PROVIDER` and token in `.env` |
-| 5. AI Agent | Claude or Codex | Configures `WORKFLOW.md` and API key in `.env` |
-| 6. Monitoring | Error tracker | Sets `MONITOR_DSN` in `.env` |
+| 3. GitHub | Repo URL, labels, project board | Creates repo, labels, project board with columns, sets secrets and variables |
+| 4. Deploys | Preview provider | Sets `DEPLOY_PROVIDER` and token as repo secrets |
+| 5. AI Agent | Claude or Codex, auth method | Configures `WORKFLOW.md`, sets API key or OAuth token as repo secret |
+| 6. Monitoring | Error tracker | Sets `MONITOR_DSN` as repo variable |
 | 7. Self-hosted runner | Use local machine for CI | Installs GitHub Actions runner, configures fallback |
 
 After the wizard finishes, the template's own `.github/` (CI for the template itself)
@@ -66,36 +66,17 @@ make check    # run lint + structural tests + unit tests
 All checks should pass on a fresh project. If something fails, check the wizard output
 for warnings. See [docs/SETUP.md](docs/SETUP.md) for troubleshooting.
 
-### Step 3: Set up GitHub
+### Step 3: Verify GitHub setup
 
-#### 3a. Configure repository settings
+The wizard handles GitHub configuration automatically:
 
-Go to your repo's **Settings > Actions > General**:
+- **Repository settings** — Actions permissions and PR creation enabled
+- **Agent secret** — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or `OPENAI_API_KEY` set as repo secret
+- **Project board** — created with Status columns: `Backlog`, `Ready`, `In Progress`, `Under Review`, `Done`
+- **Repo variables** — `PROJECT_URL` and `PROJECT_NUMBER` set
+- **Project token** — `PROJECT_TOKEN` secret set (for board sync)
 
-- Set workflow permissions to **"Read and write permissions"**
-- Check **"Allow GitHub Actions to create and approve pull requests"**
-
-#### 3b. Add secrets
-
-Go to **Settings > Secrets and variables > Actions** and add the secret for your agent:
-
-| Agent | Secret name | Value |
-|-------|------------|-------|
-| Claude Code | `ANTHROPIC_API_KEY` | Your Anthropic API key |
-| Codex | `OPENAI_API_KEY` | Your OpenAI API key |
-
-For the full list of secrets and variables (deploy tokens, project board sync, etc.),
-see [docs/SETUP.md](docs/SETUP.md#secrets-and-variables).
-
-#### 3c. Create a GitHub Project board (optional but recommended)
-
-Symphony can track issue state transitions on a Project board:
-
-1. Create a new Project at your org or user's **Projects** tab
-2. Add a **Status** field with these values: `Ready`, `In Progress`, `Human Review`, `Done`
-3. Note the project number from the URL (e.g., `/projects/3` → `3`)
-4. Add `PROJECT_URL` (full URL, e.g. `https://github.com/users/you/projects/3`) and `PROJECT_NUMBER` as repo variables
-5. Create a [PAT](https://github.com/settings/tokens) with `project` scope and add it as the `PROJECT_TOKEN` secret
+If you skipped any step during the wizard, see [docs/SETUP.md](docs/SETUP.md) for manual setup.
 
 ### Step 4: Write your first issue
 

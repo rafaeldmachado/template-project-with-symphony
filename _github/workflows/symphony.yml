@@ -9,6 +9,9 @@ name: Symphony
 # The cycle:
 #   DISCOVER → CLAIM → WORKSPACE → HOOKS → PROMPT → EXECUTE → VALIDATE → DELIVER → RECONCILE
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -132,6 +135,8 @@ jobs:
     needs: discover
     if: needs.discover.outputs.has_work == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      administration: read
     outputs:
       runner: ${{ steps.check.outputs.runner }}
     steps:
@@ -140,14 +145,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ONLINE=$(gh api "repos/${{ github.repository }}/actions/runners" \
-            --jq '[.runners[] | select(.status == "online")] | length' 2>/dev/null || echo "0")
+          RESPONSE=$(gh api "repos/${{ github.repository }}/actions/runners" 2>&1) || RESPONSE=""
+          ONLINE=$(echo "$RESPONSE" | jq '[.runners[]? | select(.status == "online")] | length' 2>/dev/null || echo "0")
           if [ "$ONLINE" -gt 0 ]; then
             echo "runner=self-hosted" >> "$GITHUB_OUTPUT"
             echo "Using self-hosted runner"
           else
             echo "runner=ubuntu-latest" >> "$GITHUB_OUTPUT"
-            echo "No self-hosted runner online, falling back to ubuntu-latest"
+            echo "No self-hosted runner online (or insufficient permissions), falling back to ubuntu-latest"
           fi
 
   execute:
@@ -367,11 +372,6 @@ jobs:
 
           git push -u origin "$BRANCH"
 
-          CHECKS_NOTE=""
-          if [ "${{ steps.validate.outputs.checks_passed }}" != "true" ]; then
-            CHECKS_NOTE=$'\n> **Warning:** `make check` had failures. Review CI output.\n'
-          fi
-
           PR_URL=$(gh pr create \
             --title "#${{ matrix.number }}: ${{ matrix.title }}" \
             --body "$(cat <<'EOF'
@@ -401,11 +401,17 @@ jobs:
           EOF
           )" \
             --head "$BRANCH" \
-            --base main 2>&1) || true
+            --base main 2>&1)
 
-          echo "PR: $PR_URL"
-          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
-          echo "pr_created=true" >> "$GITHUB_OUTPUT"
+          if echo "$PR_URL" | grep -q "^https://"; then
+            echo "PR created: $PR_URL"
+            echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "pr_created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::PR creation failed: $PR_URL"
+            echo "pr_created=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
       # ── RECONCILE: success ───────────────────────────
       - name: "Reconcile: move to human review"

@@ -58,8 +58,8 @@ in production code. File-based logging preferred over stdout flooding.
 
 ## 7. No secrets in code
 
-Secrets, tokens, and credentials must be in `.env` (gitignored) or environment
-variables. Never hardcode them.
+Secrets, tokens, and credentials must be in environment variables or GitHub repo
+secrets. Never hardcode them.
 
 **Violation**: API keys or passwords in source files.
 **Fix**: move to environment variables, reference via config layer.

@@ -8,7 +8,7 @@ set -euo pipefail
 # The preview URL is written to .deploy-artifacts/preview-url.txt
 #
 # To configure: uncomment the deploy command for your provider below
-# and set the required env vars in .env / GitHub secrets.
+# and set the required env vars as GitHub secrets.
 # See docs/DEPLOY.md for details.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

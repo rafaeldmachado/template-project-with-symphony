@@ -93,17 +93,9 @@ else
 fi
 
 # ── Detect repo ───────────────────────────────────────
-# Prefer GITHUB_REPO from .env (set by make init) over git remote,
-# since the remote may still point to the template repo after cloning.
-GITHUB_REPO=""
-if [ -f "$ROOT_DIR/.env" ]; then
-  GITHUB_REPO=$(grep -E '^GITHUB_REPO=' "$ROOT_DIR/.env" 2>/dev/null | cut -d'=' -f2- | tr -d '[:space:]' || true)
-fi
+GITHUB_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
 if [ -z "$GITHUB_REPO" ]; then
-  GITHUB_REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
-fi
-if [ -z "$GITHUB_REPO" ]; then
-  fail "Could not detect GitHub repository. Run 'make init' first or set GITHUB_REPO in .env."
+  fail "Could not detect GitHub repository. Run 'make init' first or add a git remote."
 fi
 
 echo ""

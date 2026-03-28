@@ -265,7 +265,7 @@ The spec uses an in-memory claim model. We use **GitHub labels as persisted stat
 | Reconcile running | Not applicable mid-tick — each run is atomic. But reconcile steps at the end of each job do label cleanup |
 | Validate config | `parse-config.sh` runs at start of discover job |
 | Fetch candidates | `gh issue list --label ready --label agent --state open --limit $MAX` |
-| Sort by priority | Not implemented — GitHub returns issues in default order (newest first). Could add `--jq 'sort_by(.createdAt)'` for oldest-first |
+| Sort by priority | Implemented — issues sorted by priority labels (`p0` > `p1` > `p2`) then by issue number |
 | Dispatch eligible | Matrix strategy: each discovered issue becomes a parallel job |
 
 ### Candidate Selection
@@ -277,7 +277,7 @@ The spec uses an in-memory claim model. We use **GitHub labels as persisted stat
 | Not in `running` | The `in-progress` label excludes it from the `ready` query. Concurrency group `symphony-dispatch` prevents overlapping discover jobs |
 | Global concurrency slots | `strategy.max-parallel: ${{ max_concurrent }}` limits parallel matrix jobs |
 | Per-state concurrency | Not implemented — all issues share the global pool |
-| Blocker rule (Todo state) | Not applicable — GitHub has no native blocker relation |
+| Blocker rule | Blockers fetched via GraphQL `blockedBy` field and included in prompt. No dispatch-time blocking — agent sees blockers in context but is not prevented from running |
 
 ### Concurrency Control
 
@@ -323,7 +323,7 @@ that works with any agent that accepts a prompt on the command line.
 | Invocation | Direct CLI, not `bash -lc` | Direct CLI, not `bash -lc` |
 | Working dir | `$GITHUB_WORKSPACE` | `$GITHUB_WORKSPACE` |
 | Protocol | None — fire-and-forget CLI | None — fire-and-forget CLI |
-| Auth | `ANTHROPIC_API_KEY` env var | `OPENAI_API_KEY` env var |
+| Auth | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` env var | `OPENAI_API_KEY` env var |
 
 ### Session Startup
 
@@ -519,7 +519,7 @@ Tracked per run via agent JSON output:
 | **Workspace** | Checkout fails, branch creation fails | Execute job fails → reconcile returns issue to `ready` |
 | **Agent Session** | CLI exits non-zero, timeout, OOM | Execute step fails → reconcile returns issue to `ready` |
 | **Tracker** | `gh` CLI fails (API error, auth issue) | Discover or reconcile step fails → visible in Actions logs |
-| **Observability** | Issue comment fails to post | Non-fatal — `|| true` on some commands. Label transition is the critical path |
+| **Observability** | Issue comment fails to post | Non-fatal — comment posting is guarded. Label transitions and PR creation are the critical path and fail hard |
 
 ### Recovery Behavior
 
