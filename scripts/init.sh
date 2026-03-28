@@ -194,7 +194,7 @@ esac
 NODE_CI_STEPS='      - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      - run: if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
 
 PYTHON_CI_STEPS='      - uses: actions/setup-python@v5
         with:
@@ -204,23 +204,24 @@ PYTHON_CI_STEPS='      - uses: actions/setup-python@v5
 GO_CI_STEPS='      - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-      - run: go mod download'
+      - run: if [ -f go.mod ]; then go mod download; fi'
 
 RUST_CI_STEPS='      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo fetch'
+      - run: if [ -f Cargo.toml ]; then cargo fetch; fi'
 
 ELIXIR_CI_STEPS='      - uses: erlef/setup-beam@v1
         with:
           otp-version: "27"
           elixir-version: "1.18"
-      - run: mix deps.get'
+      - run: if [ -f mix.exs ]; then mix deps.get; fi'
 
 RUBY_CI_STEPS='      - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
-          bundler-cache: true'
+          bundler-cache: true
+      - run: if [ -f Gemfile ]; then bundle install; fi'
 
 JAVA_CI_STEPS='      - uses: actions/setup-java@v4
         with:
@@ -243,7 +244,7 @@ resolve_stack() {
       _FMT='npx prettier --write .'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx create-next-app@latest . --ts --eslint --tailwind --app --src-dir --import-alias "@/*" --use-npm && npm install -D vitest @vitejs/plugin-react playwright'
       ;;
@@ -252,7 +253,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx sv create . --template minimal --types ts --no-add-ons && npm install -D vitest playwright eslint prettier'
       ;;
@@ -261,7 +262,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx nuxi@latest init . --force && npm install -D vitest @nuxt/test-utils playwright eslint prettier'
       ;;
@@ -270,7 +271,7 @@ resolve_stack() {
       _FMT='npx prettier --write .'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm create astro@latest -- . --template minimal --typescript strict --install --no-git && npm install -D vitest playwright prettier'
       ;;
@@ -279,7 +280,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx create-remix@latest . --yes && npm install -D vitest playwright prettier'
       ;;
@@ -288,7 +289,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx vitest run tests/e2e'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm create hono@latest . -- --template nodejs && npm install -D typescript eslint prettier vitest @types/node'
       ;;
@@ -297,7 +298,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx vitest run tests/e2e'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm init -y && npm install express && npm install -D typescript @types/express @types/node eslint prettier vitest tsx && npx tsc --init'
       ;;
@@ -306,7 +307,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm init -y && npm install -D typescript eslint prettier vitest @types/node && npx tsc --init'
       ;;
@@ -315,7 +316,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm init -y && npm install -D eslint prettier vitest'
       ;;
@@ -959,15 +960,62 @@ fi
 if [ -n "$PKG_INIT_CMD" ]; then
   echo ""
   if confirm "Initialize $STACK project scaffolding now?"; then
+    # Many scaffold tools (create-next-app, cargo init, etc.) refuse to run
+    # in a non-empty directory. Work around this by scaffolding into a temp
+    # directory first, then merging generated files into the project root
+    # without overwriting existing files.
+    SCAFFOLD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/scaffold-XXXXXX")
+    info "Scaffolding into temp directory..."
     info "Running: $PKG_INIT_CMD"
-    cd "$ROOT_DIR"
-    if eval "$PKG_INIT_CMD"; then
-      ok "Project scaffolded"
+
+    SCAFFOLD_EXIT=0
+    (cd "$SCAFFOLD_DIR" && eval "$PKG_INIT_CMD") || SCAFFOLD_EXIT=$?
+
+    if [ $SCAFFOLD_EXIT -eq 0 ]; then
+      # Merge scaffolded files into project root (don't overwrite existing)
+      MERGED=0
+      SKIPPED=0
+      while IFS= read -r -d '' file; do
+        rel="${file#$SCAFFOLD_DIR/}"
+        dest="$ROOT_DIR/$rel"
+        if [ -d "$file" ] && [ ! -f "$file" ]; then
+          continue  # directories are created as needed
+        fi
+        # Skip build artifacts and virtual environments
+        case "$rel" in
+          .venv/*|node_modules/*|__pycache__/*|target/*|.git/*|_build/*|deps/*) continue ;;
+        esac
+        mkdir -p "$(dirname "$dest")"
+        if [ -f "$dest" ]; then
+          SKIPPED=$((SKIPPED + 1))
+        else
+          cp "$file" "$dest"
+          MERGED=$((MERGED + 1))
+        fi
+      done < <(find "$SCAFFOLD_DIR" -not -name '.' -print0)
+      ok "Project scaffolded ($MERGED files added, $SKIPPED existing files kept)"
+
+      # Copy lock files and config that SHOULD overwrite (dependency manifests)
+      for f in package.json package-lock.json yarn.lock pnpm-lock.yaml \
+               requirements.txt Pipfile.lock go.mod go.sum Cargo.toml Cargo.lock \
+               Gemfile Gemfile.lock mix.exs mix.lock build.gradle build.gradle.kts \
+               settings.gradle settings.gradle.kts gradlew gradlew.bat tsconfig.json; do
+        if [ -f "$SCAFFOLD_DIR/$f" ]; then
+          cp "$SCAFFOLD_DIR/$f" "$ROOT_DIR/$f"
+        fi
+      done
+
+      # Copy gradle wrapper directory if present
+      if [ -d "$SCAFFOLD_DIR/gradle" ]; then
+        cp -r "$SCAFFOLD_DIR/gradle" "$ROOT_DIR/"
+      fi
     else
       echo ""
-      fail "Scaffolding failed (exit code $?). Check the output above for details."
-      info "You can retry manually: $PKG_INIT_CMD"
+      fail "Scaffolding failed (exit code $SCAFFOLD_EXIT). Check the output above."
+      info "You can retry manually: cd $ROOT_DIR && $PKG_INIT_CMD"
     fi
+
+    rm -rf "$SCAFFOLD_DIR"
   else
     info "Skipped. Run manually later:"
     info "  cd $(basename "$ROOT_DIR") && $PKG_INIT_CMD"
@@ -1007,10 +1055,16 @@ fi
 # ── 14. Set up self-hosted runner ─────────────────────
 if [ "$SETUP_RUNNER" = true ]; then
   echo ""
-  if ! "$SCRIPT_DIR/runner/setup.sh"; then
-    echo ""
-    fail "Runner setup failed. See the output above for details."
-    info "Retry later with: make setup-runner"
+  # Runner needs a GitHub repo to register against
+  if [ -n "$GITHUB_REPO" ] && gh repo view "$GITHUB_REPO" &>/dev/null; then
+    if ! "$SCRIPT_DIR/runner/setup.sh"; then
+      echo ""
+      fail "Runner setup failed. See the output above for details."
+      info "Retry later with: make setup-runner"
+    fi
+  else
+    warn "Runner setup skipped — GitHub repository not accessible yet."
+    info "Set up the runner after repo creation: make setup-runner"
   fi
 fi
 
