@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Disable pager for gh CLI so commands never open vi/less
+export GH_PAGER=""
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Project initialization wizard
 #
@@ -677,7 +680,11 @@ if [ "$CREATE_REPO" = true ] && [ -n "$GITHUB_REPO" ]; then
   fi
 
   CREATE_EXIT=0
-  CREATE_OUTPUT=$(gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin 2>&1) || CREATE_EXIT=$?
+  DESC_FLAG=""
+  if [ -n "${PROJECT_DESC:-}" ]; then
+    DESC_FLAG="--description=${PROJECT_DESC}"
+  fi
+  CREATE_OUTPUT=$(gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin $DESC_FLAG 2>&1) || CREATE_EXIT=$?
   if [ $CREATE_EXIT -eq 0 ]; then
     ok "Created repository: $GITHUB_REPO ($REPO_VISIBILITY)"
   elif gh repo view "$GITHUB_REPO" &>/dev/null; then
@@ -694,7 +701,7 @@ fi
 if [ -n "$GITHUB_REPO" ] && gh repo view "$GITHUB_REPO" &>/dev/null; then
   gh api --method PUT "repos/${GITHUB_REPO}/actions/permissions/workflow" \
     --field can_approve_pull_request_reviews=true \
-    --field default_workflow_permissions="write" 2>/dev/null && \
+    --field default_workflow_permissions="write" >/dev/null 2>&1 && \
     ok "Enabled GitHub Actions to create PRs and write permissions" || \
     warn "Could not update Actions permissions. Enable manually: repo Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests'"
 fi
@@ -1079,7 +1086,7 @@ if [ "$CREATE_PROJECT" = true ] && [ -n "$GITHUB_REPO" ]; then
           }) {
             projectV2Field { ... on ProjectV2SingleSelectField { name } }
           }
-        }" 2>/dev/null && \
+        }" >/dev/null 2>&1 && \
         ok "Status columns: Backlog → Ready → In Progress → Under Review → Done" || \
         warn "Failed to configure Status columns — set them manually in the project"
     else

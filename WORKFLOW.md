@@ -56,7 +56,7 @@ agent:
   # claude | codex
   name: claude
   model: sonnet
-  max_turns: 50
+  max_turns: 100
   max_budget_usd: 10
   max_concurrent_agents: 5
   max_retry_backoff_ms: 300000
