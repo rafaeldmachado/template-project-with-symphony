@@ -12,8 +12,9 @@ teardown() {
   teardown_temp_repo
 }
 
-# Input: name, desc, stack=7(None), deploy=5(None), agent=3(None), monitoring=4(None)
-INIT_INPUTS="test-project\nA test project\n7\n5\n3\n4\n"
+# Input: name, desc, stack_cat=5(None), deploy=5(None), agent=3(None),
+#         monitoring=4(None), runner=n
+INIT_INPUTS="test-project\nA test project\n5\n5\n3\n4\nn\n"
 
 @test "removes template-specific files" {
   run_init_with_inputs "$INIT_INPUTS"

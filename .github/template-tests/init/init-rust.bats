@@ -12,9 +12,9 @@ teardown() {
   teardown_temp_repo
 }
 
-# Input: name, desc, stack=5(Rust), deploy=5(None), agent=3(None),
-#         monitoring=4(None), scaffold=n
-INIT_INPUTS="rustapp\nRust app\n5\n5\n3\n4\nn\n"
+# Input: name, desc, stack_cat=3(Backend), framework=14(Rust no framework),
+#         deploy=5(None), agent=3(None), monitoring=4(None), runner=n, scaffold=n
+INIT_INPUTS="rustapp\nRust app\n3\n14\n5\n3\n4\nn\nn\n"
 
 @test "generates lint.sh with cargo clippy" {
   run_init_with_inputs "$INIT_INPUTS"

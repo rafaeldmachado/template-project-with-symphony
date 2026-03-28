@@ -13,9 +13,9 @@ teardown() {
 }
 
 @test "creates labels when gh available and user confirms" {
-  # Input: name, desc, stack=7(None), GitHub=y, repo=accept default, labels=y,
-  #         deploy=5(None), agent=3(None), monitoring=4(None)
-  local inputs="ghapp\nGH test\n7\ny\n\ny\n5\n3\n4\n"
+  # Input: name, desc, stack_cat=5(None), GitHub=y, repo=accept default, labels=y,
+  #         deploy=5(None), agent=3(None), monitoring=4(None), runner=n
+  local inputs="ghapp\nGH test\n5\ny\n\ny\n5\n3\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/.mocks/gh.calls"
@@ -24,9 +24,9 @@ teardown() {
 }
 
 @test "skips GitHub when user declines" {
-  # Input: name, desc, stack=7(None), GitHub=n,
-  #         deploy=5(None), agent=3(None), monitoring=4(None)
-  local inputs="ghapp\nGH test\n7\nn\n5\n3\n4\n"
+  # Input: name, desc, stack_cat=5(None), GitHub=n,
+  #         deploy=5(None), agent=3(None), monitoring=4(None), runner=n
+  local inputs="ghapp\nGH test\n5\nn\n5\n3\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   if [ -f "$TEST_REPO/.mocks/gh.calls" ]; then

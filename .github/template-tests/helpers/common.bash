@@ -96,7 +96,10 @@ MOCK_EOF
 
 # ── Build a PATH that excludes a specific command ──────
 # Usage: path_without <command-name>
-# Returns a colon-separated PATH with directories that contain <command-name> removed.
+# Returns a colon-separated PATH with the target command removed.
+# If the target lives in a directory with other essential tools (e.g. /usr/bin),
+# a shadow directory with symlinks to everything EXCEPT the target is used
+# so that bash, rm, cat, etc. remain available.
 path_without() {
   local cmd="$1"
   local new_path=""
@@ -105,6 +108,17 @@ path_without() {
     [ -z "$dir" ] && continue
     if [ ! -x "$dir/$cmd" ]; then
       new_path="${new_path:+$new_path:}$dir"
+    else
+      # Directory contains the target — create a shadow with everything else
+      local shadow_dir
+      shadow_dir="$(mktemp -d "${BATS_TMPDIR:-/tmp}/path-shadow-XXXXXX")"
+      for f in "$dir"/*; do
+        [ ! -f "$f" ] && continue
+        local name="${f##*/}"
+        [ "$name" = "$cmd" ] && continue
+        ln -sf "$f" "$shadow_dir/$name" 2>/dev/null || true
+      done
+      new_path="${new_path:+$new_path:}$shadow_dir"
     fi
   done
   echo "$new_path"
@@ -112,7 +126,12 @@ path_without() {
 
 # ── Pipe answers to the init wizard ────────────────────
 # Usage: run_init_with_inputs "answer1\nanswer2\n..."
+# Times out after 60s to prevent hangs from insufficient inputs.
 run_init_with_inputs() {
   local inputs="$1"
-  printf '%b' "$inputs" | bash "$TEST_REPO/scripts/init.sh" 2>&1
+  local timeout_cmd=""
+  if command -v timeout &>/dev/null; then
+    timeout_cmd="timeout 60"
+  fi
+  printf '%b' "$inputs" | $timeout_cmd bash "$TEST_REPO/scripts/init.sh" 2>&1
 }

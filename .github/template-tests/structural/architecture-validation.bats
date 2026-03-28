@@ -17,11 +17,11 @@ teardown() {
 }
 
 @test "fails when required file is missing" {
-  rm -f "$TEST_REPO/AGENTS.md"
+  rm -f "$TEST_REPO/CLAUDE.md"
 
   run bash -c "cd '$TEST_REPO' && bash tests/structural/architecture.sh"
   assert_failure
-  assert_output --partial "Required file missing: AGENTS.md"
+  assert_output --partial "Required file missing: CLAUDE.md"
 }
 
 @test "fails when source file exceeds 500 lines" {

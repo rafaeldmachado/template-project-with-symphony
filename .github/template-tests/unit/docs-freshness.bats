@@ -17,11 +17,11 @@ teardown() {
 }
 
 @test "fails when a required doc is missing" {
-  rm -f "$TEST_REPO/AGENTS.md"
+  rm -f "$TEST_REPO/CLAUDE.md"
 
   run bash "$TEST_REPO/scripts/checks/docs-freshness.sh"
   assert_failure
-  assert_output --partial "Missing required doc: AGENTS.md"
+  assert_output --partial "Missing required doc: CLAUDE.md"
 }
 
 @test "detects broken internal links" {

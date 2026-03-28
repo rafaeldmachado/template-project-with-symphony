@@ -13,8 +13,9 @@ teardown() {
 }
 
 @test "Claude selection sets agent name in WORKFLOW.md" {
-  # Input: name, desc, stack=7(None), deploy=5(None), agent=1(Claude), monitoring=4(None)
-  local inputs="agentapp\nAgent test\n7\n5\n1\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=5(None), agent=1(Claude),
+  #         api_key=(empty), monitoring=4(None), runner=n
+  local inputs="agentapp\nAgent test\n5\n5\n1\n\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/WORKFLOW.md"
@@ -23,8 +24,9 @@ teardown() {
 }
 
 @test "Codex selection sets agent name in WORKFLOW.md" {
-  # Input: name, desc, stack=7(None), deploy=5(None), agent=2(Codex), monitoring=4(None)
-  local inputs="agentapp\nAgent test\n7\n5\n2\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=5(None), agent=2(Codex),
+  #         api_key=(empty), monitoring=4(None), runner=n
+  local inputs="agentapp\nAgent test\n5\n5\n2\n\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/WORKFLOW.md"
@@ -33,8 +35,9 @@ teardown() {
 }
 
 @test "Claude sets ANTHROPIC_API_KEY in .env" {
-  # Input: name, desc, stack=7(None), deploy=5(None), agent=1(Claude), monitoring=4(None)
-  local inputs="agentapp\nAgent test\n7\n5\n1\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=5(None), agent=1(Claude),
+  #         api_key=(empty), monitoring=4(None), runner=n
+  local inputs="agentapp\nAgent test\n5\n5\n1\n\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/.env"
@@ -43,8 +46,9 @@ teardown() {
 }
 
 @test "Codex sets OPENAI_API_KEY in .env" {
-  # Input: name, desc, stack=7(None), deploy=5(None), agent=2(Codex), monitoring=4(None)
-  local inputs="agentapp\nAgent test\n7\n5\n2\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=5(None), agent=2(Codex),
+  #         api_key=(empty), monitoring=4(None), runner=n
+  local inputs="agentapp\nAgent test\n5\n5\n2\n\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/.env"

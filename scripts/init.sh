@@ -194,14 +194,12 @@ esac
 NODE_CI_STEPS='      - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
-      - run: npm ci'
+      - run: if [ -f package-lock.json ]; then npm ci; else npm install; fi'
 
 PYTHON_CI_STEPS='      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: "pip"
-      - run: pip install -r requirements.txt'
+      - run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi'
 
 GO_CI_STEPS='      - uses: actions/setup-go@v5
         with:
@@ -228,8 +226,7 @@ JAVA_CI_STEPS='      - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "21"
-          cache: "gradle"
-      - run: ./gradlew dependencies'
+      - run: if [ -f gradlew ]; then ./gradlew dependencies; fi'
 
 # ── resolve_stack: sets _LINTER, _FMT, _TEST, _E2E, _SETUP, _CI, _PKG
 #    for a given framework name. Used for both single-stack and fullstack.
@@ -246,7 +243,7 @@ resolve_stack() {
       _FMT='npx prettier --write .'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx create-next-app@latest . --ts --eslint --tailwind --app --src-dir --import-alias "@/*" --use-npm && npm install -D vitest @vitejs/plugin-react playwright'
       ;;
@@ -255,7 +252,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx sv create . --template minimal --types ts --no-add-ons && npm install -D vitest playwright eslint prettier'
       ;;
@@ -264,7 +261,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx nuxi@latest init . --force && npm install -D vitest @nuxt/test-utils playwright eslint prettier'
       ;;
@@ -273,7 +270,7 @@ resolve_stack() {
       _FMT='npx prettier --write .'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm create astro@latest -- . --template minimal --typescript strict --install --no-git && npm install -D vitest playwright prettier'
       ;;
@@ -282,7 +279,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npx create-remix@latest . --yes && npm install -D vitest playwright prettier'
       ;;
@@ -291,7 +288,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx vitest run tests/e2e'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm create hono@latest . -- --template nodejs && npm install -D typescript eslint prettier vitest @types/node'
       ;;
@@ -300,7 +297,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx vitest run tests/e2e'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm init -y && npm install express && npm install -D typescript @types/express @types/node eslint prettier vitest tsx && npx tsc --init'
       ;;
@@ -309,7 +306,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm init -y && npm install -D typescript eslint prettier vitest @types/node && npx tsc --init'
       ;;
@@ -318,7 +315,7 @@ resolve_stack() {
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run'
       _E2E='npx playwright test'
-      _SETUP='npm ci'
+      _SETUP='if [ -f package-lock.json ]; then npm ci; else npm install; fi'
       _CI="$NODE_CI_STEPS"
       _PKG='npm init -y && npm install -D eslint prettier vitest'
       ;;

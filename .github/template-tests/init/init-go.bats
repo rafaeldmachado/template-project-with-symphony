@@ -12,9 +12,9 @@ teardown() {
   teardown_temp_repo
 }
 
-# Input: name, desc, stack=4(Go), deploy=5(None), agent=3(None),
-#         monitoring=4(None), scaffold=n
-INIT_INPUTS="goapp\nGo app\n4\n5\n3\n4\nn\n"
+# Input: name, desc, stack_cat=3(Backend), framework=6(Go), deploy=5(None),
+#         agent=3(None), monitoring=4(None), runner=n, scaffold=n
+INIT_INPUTS="goapp\nGo app\n3\n6\n5\n3\n4\nn\nn\n"
 
 @test "generates lint.sh with golangci-lint" {
   run_init_with_inputs "$INIT_INPUTS"

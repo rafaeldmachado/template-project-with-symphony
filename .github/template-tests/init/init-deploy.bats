@@ -13,8 +13,9 @@ teardown() {
 }
 
 @test "Vercel sets DEPLOY_PROVIDER=vercel" {
-  # Input: name, desc, stack=7(None), deploy=1(Vercel), agent=3(None), monitoring=4(None)
-  local inputs="deployapp\nDeploy test\n7\n1\n3\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=1(Vercel), token=(empty),
+  #         project_id=(empty), agent=3(None), monitoring=4(None), runner=n
+  local inputs="deployapp\nDeploy test\n5\n1\n\n\n3\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/.env"
@@ -23,8 +24,9 @@ teardown() {
 }
 
 @test "Netlify sets DEPLOY_PROVIDER=netlify" {
-  # Input: name, desc, stack=7(None), deploy=2(Netlify), agent=3(None), monitoring=4(None)
-  local inputs="deployapp\nDeploy test\n7\n2\n3\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=2(Netlify), token=(empty),
+  #         site_id=(empty), agent=3(None), monitoring=4(None), runner=n
+  local inputs="deployapp\nDeploy test\n5\n2\n\n\n3\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/.env"
@@ -33,8 +35,9 @@ teardown() {
 }
 
 @test "None sets empty DEPLOY_PROVIDER" {
-  # Input: name, desc, stack=7(None), deploy=5(None), agent=3(None), monitoring=4(None)
-  local inputs="deployapp\nDeploy test\n7\n5\n3\n4\n"
+  # Input: name, desc, stack_cat=5(None), deploy=5(None), agent=3(None),
+  #         monitoring=4(None), runner=n
+  local inputs="deployapp\nDeploy test\n5\n5\n3\n4\nn\n"
   run_init_with_inputs "$inputs"
 
   assert_file_exist "$TEST_REPO/.env"

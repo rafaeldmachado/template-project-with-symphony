@@ -12,9 +12,10 @@ teardown() {
   teardown_temp_repo
 }
 
-# Input: name, desc, stack=1(Node TS), deploy=5(None), agent=1(Claude),
-#         monitoring=4(None), scaffold=n
-INIT_INPUTS="my-app\nMy app desc\n1\n5\n1\n4\nn\n"
+# Input: name, desc, stack_cat=3(Backend), framework=12(Node.js TS no framework),
+#         deploy=5(None), agent=1(Claude), api_key=(empty),
+#         monitoring=4(None), runner=n, scaffold=n
+INIT_INPUTS="my-app\nMy app desc\n3\n12\n5\n1\n\n4\nn\nn\n"
 
 @test "generates lint.sh with eslint and prettier" {
   run_init_with_inputs "$INIT_INPUTS"
@@ -39,7 +40,7 @@ INIT_INPUTS="my-app\nMy app desc\n1\n5\n1\n4\nn\n"
   assert_file_exist "$TEST_REPO/.github/workflows/ci.yml"
   run cat "$TEST_REPO/.github/workflows/ci.yml"
   assert_output --partial "setup-node"
-  assert_output --partial "npm ci"
+  assert_output --partial "npm"
 }
 
 @test "creates .env with ANTHROPIC_API_KEY" {
