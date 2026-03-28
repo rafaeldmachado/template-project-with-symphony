@@ -684,11 +684,11 @@ if [ "$CREATE_REPO" = true ] && [ -n "$GITHUB_REPO" ]; then
   fi
 
   CREATE_EXIT=0
-  DESC_FLAG=""
+  CREATE_ARGS=("$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin)
   if [ -n "${PROJECT_DESC:-}" ]; then
-    DESC_FLAG="--description=${PROJECT_DESC}"
+    CREATE_ARGS+=(--description "${PROJECT_DESC}")
   fi
-  CREATE_OUTPUT=$(gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin $DESC_FLAG 2>&1) || CREATE_EXIT=$?
+  CREATE_OUTPUT=$(gh repo create "${CREATE_ARGS[@]}" 2>&1) || CREATE_EXIT=$?
   if [ $CREATE_EXIT -eq 0 ]; then
     ok "Created repository: $GITHUB_REPO ($REPO_VISIBILITY)"
   elif gh repo view "$GITHUB_REPO" &>/dev/null; then
