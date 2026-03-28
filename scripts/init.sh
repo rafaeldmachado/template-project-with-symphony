@@ -663,8 +663,8 @@ if [ "$CREATE_REPO" = true ] && [ -n "$GITHUB_REPO" ]; then
     git remote add origin "$PROJECT_URL"
   fi
 
-  CREATE_OUTPUT=$(gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin 2>&1)
-  CREATE_EXIT=$?
+  CREATE_EXIT=0
+  CREATE_OUTPUT=$(gh repo create "$GITHUB_REPO" $VISIBILITY_FLAG --source "$ROOT_DIR" --remote origin 2>&1) || CREATE_EXIT=$?
   if [ $CREATE_EXIT -eq 0 ]; then
     ok "Created repository: $GITHUB_REPO ($REPO_VISIBILITY)"
   elif gh repo view "$GITHUB_REPO" &>/dev/null; then
@@ -933,8 +933,9 @@ if [ "$CREATE_LABELS" = true ] && [ -n "$GITHUB_REPO" ]; then
 
     create_label() {
       local name="$1" color="$2" desc="$3"
-      OUTPUT=$(gh label create "$name" --repo "$GITHUB_REPO" --color "$color" --description "$desc" 2>&1)
-      if [ $? -eq 0 ]; then
+      local exit_code=0
+      OUTPUT=$(gh label create "$name" --repo "$GITHUB_REPO" --color "$color" --description "$desc" 2>&1) || exit_code=$?
+      if [ $exit_code -eq 0 ]; then
         ok "Label: $name"
       elif echo "$OUTPUT" | grep -qi "already exists"; then
         info "Label '$name' already exists"
@@ -1055,8 +1056,8 @@ fi
 if git remote get-url origin &>/dev/null; then
   CURRENT_BRANCH=$(git branch --show-current)
   info "Pushing to origin/${CURRENT_BRANCH}..."
-  PUSH_OUTPUT=$(git push -u origin "$CURRENT_BRANCH" 2>&1)
-  PUSH_EXIT=$?
+  PUSH_EXIT=0
+  PUSH_OUTPUT=$(git push -u origin "$CURRENT_BRANCH" 2>&1) || PUSH_EXIT=$?
   if [ $PUSH_EXIT -eq 0 ]; then
     ok "Pushed to origin/${CURRENT_BRANCH}"
   else

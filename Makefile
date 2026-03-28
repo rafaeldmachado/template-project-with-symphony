@@ -1,4 +1,4 @@
-.PHONY: help init setup check lint test test-e2e structure worktree worktree-cleanup \
+.PHONY: help init teardown setup check lint test test-e2e structure worktree worktree-cleanup \
        gc gc-branches gc-worktrees gc-deploys gc-artifacts \
        deploy-preview deploy-cleanup test-template \
        setup-runner runner-start runner-stop runner-status runner-remove
@@ -20,6 +20,9 @@ help: ## Show this help
 
 init: ## Interactive wizard — configure stack, GitHub, deploys, agent
 	@./scripts/init.sh
+
+teardown: ## Undo init — remove runner, repo, config, git state
+	@./scripts/teardown.sh
 
 setup: ## Install dependencies and configure the project
 	@./scripts/setup.sh
