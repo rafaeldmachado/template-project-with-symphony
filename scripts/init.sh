@@ -4,6 +4,10 @@ set -euo pipefail
 # Disable pager for gh CLI so commands never open vi/less
 export GH_PAGER=""
 
+# Ensure sane terminal settings (backspace, line editing)
+# Needed when launched from shells with custom configs (oh-my-zsh, etc.)
+stty sane 2>/dev/null || true
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Project initialization wizard
 #
@@ -1020,6 +1024,8 @@ if [ "$CREATE_PROJECT" = true ] && [ -n "$GITHUB_REPO" ]; then
       gh auth refresh -s project,read:project 2>&1 || {
         warn "Failed to refresh scopes. Run manually: gh auth refresh -s project,read:project"
       }
+      # gh auth refresh can corrupt terminal settings (interactive browser flow)
+      stty sane 2>/dev/null || true
     else
       warn "Skipping project creation — missing required scopes."
       warn "Run later: gh auth refresh -s project,read:project"
