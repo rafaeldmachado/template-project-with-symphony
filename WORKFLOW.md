@@ -18,7 +18,7 @@
 tracker:
   kind: github
   repo: $GITHUB_REPO
-  project_number: $GITHUB_PROJECT_NUMBER
+  project_number: $PROJECT_NUMBER
   active_states:
     - ready
     - in-progress

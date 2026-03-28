@@ -60,7 +60,7 @@ parse_yaml_value() {
 # Tracker
 echo "SYMPHONY_TRACKER_KIND=$(parse_yaml_value 'kind' 'github')"
 echo "SYMPHONY_REPO=$(parse_yaml_value 'repo' "${GITHUB_REPOSITORY:-}")"
-echo "SYMPHONY_PROJECT_NUMBER=$(parse_yaml_value 'project_number' "${GITHUB_PROJECT_NUMBER:-}")"
+echo "SYMPHONY_PROJECT_NUMBER=$(parse_yaml_value 'project_number' "${PROJECT_NUMBER:-}")"
 
 # States (extract list items under a key)
 extract_list() {

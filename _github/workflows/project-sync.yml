@@ -6,13 +6,10 @@ on:
   pull_request:
     types: [opened, closed, reopened, ready_for_review, converted_to_draft]
 
-env:
-  PROJECT_NUMBER: ${{ vars.GITHUB_PROJECT_NUMBER }}
-
 jobs:
   sync-issue:
     name: Sync issue to project board
-    if: github.event_name == 'issues'
+    if: github.event_name == 'issues' && vars.PROJECT_URL != ''
     runs-on: ubuntu-latest
     permissions:
       issues: read
@@ -21,12 +18,12 @@ jobs:
       - name: Add issue to project
         uses: actions/add-to-project@v1.0.2
         with:
-          project-url: https://github.com/orgs/${{ github.repository_owner }}/projects/${{ env.PROJECT_NUMBER }}
+          project-url: ${{ vars.PROJECT_URL }}
           github-token: ${{ secrets.PROJECT_TOKEN }}
 
   sync-pr:
     name: Sync PR to project board
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.PROJECT_URL != ''
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
@@ -35,12 +32,12 @@ jobs:
       - name: Add PR to project
         uses: actions/add-to-project@v1.0.2
         with:
-          project-url: https://github.com/orgs/${{ github.repository_owner }}/projects/${{ env.PROJECT_NUMBER }}
+          project-url: ${{ vars.PROJECT_URL }}
           github-token: ${{ secrets.PROJECT_TOKEN }}
 
   update-status:
     name: Update project item status
-    if: github.event.action == 'closed' || github.event.action == 'reopened'
+    if: (github.event.action == 'closed' || github.event.action == 'reopened') && vars.PROJECT_URL != ''
     runs-on: ubuntu-latest
     permissions:
       issues: read

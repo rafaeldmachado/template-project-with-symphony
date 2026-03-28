@@ -94,7 +94,7 @@ Symphony can track issue state transitions on a Project board:
 1. Create a new Project at your org or user's **Projects** tab
 2. Add a **Status** field with these values: `Ready`, `In Progress`, `Human Review`, `Done`
 3. Note the project number from the URL (e.g., `/projects/3` → `3`)
-4. Add it as a `GITHUB_PROJECT_NUMBER` variable in your repo settings
+4. Add `PROJECT_URL` (full URL, e.g. `https://github.com/users/you/projects/3`) and `PROJECT_NUMBER` as repo variables
 5. Create a [PAT](https://github.com/settings/tokens) with `project` scope and add it as the `PROJECT_TOKEN` secret
 
 ### Step 4: Write your first issue

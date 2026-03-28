@@ -77,7 +77,8 @@ Only add the secrets you need. Symphony needs exactly one agent key.
 
 | Name | Required for | Value |
 |------|-------------|-------|
-| `GITHUB_PROJECT_NUMBER` | Project board sync | The number from your project URL |
+| `PROJECT_URL` | Project board sync | Full project URL (e.g. `https://github.com/users/you/projects/3`) |
+| `PROJECT_NUMBER` | Project board sync | The number from your project URL |
 | `DEPLOY_PROVIDER` | PR preview deploys | `vercel`, `netlify`, `cloudflare`, `fly`, or `custom` |
 | `DEPLOY_PROJECT_ID` | PR preview deploys | Your deploy project/site ID |
 
@@ -85,7 +86,7 @@ Only add the secrets you need. Symphony needs exactly one agent key.
 
 1. Go to your org or user's Projects tab and create a new project.
 2. Note the project number from the URL (e.g., `github.com/orgs/acme/projects/3` → `3`).
-3. Add it as the `GITHUB_PROJECT_NUMBER` variable above.
+3. Add `PROJECT_URL` (full URL) and `PROJECT_NUMBER` as repo variables.
 4. Create a PAT at github.com/settings/tokens with `project` scope and add it
    as the `PROJECT_TOKEN` secret.
 
