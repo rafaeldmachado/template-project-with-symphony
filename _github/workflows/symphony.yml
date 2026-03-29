@@ -129,37 +129,11 @@ jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # EXECUTE — one job per issue, full cycle
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # ── Pick runner: prefer self-hosted, fall back to GitHub-hosted ──
-  pick-runner:
-    name: Pick runner
-    needs: discover
-    if: needs.discover.outputs.has_work == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      administration: read
-    outputs:
-      runner: ${{ steps.check.outputs.runner }}
-    steps:
-      - name: Check for online self-hosted runner
-        id: check
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          RESPONSE=$(gh api "repos/${{ github.repository }}/actions/runners" 2>&1) || RESPONSE=""
-          ONLINE=$(echo "$RESPONSE" | jq '[.runners[]? | select(.status == "online")] | length' 2>/dev/null || echo "0")
-          if [ "$ONLINE" -gt 0 ]; then
-            echo "runner=self-hosted" >> "$GITHUB_OUTPUT"
-            echo "Using self-hosted runner"
-          else
-            echo "runner=ubuntu-latest" >> "$GITHUB_OUTPUT"
-            echo "No self-hosted runner online (or insufficient permissions), falling back to ubuntu-latest"
-          fi
-
   execute:
     name: "#${{ matrix.number }} — ${{ matrix.title }}"
-    needs: [discover, pick-runner]
+    needs: discover
     if: needs.discover.outputs.has_work == 'true'
-    runs-on: ${{ needs.pick-runner.outputs.runner }}
+    runs-on: ${{ vars.RUNNER || 'self-hosted' }}
     timeout-minutes: ${{ fromJson(needs.discover.outputs.timeout_minutes) }}
     permissions:
       contents: write
