@@ -25,8 +25,8 @@ on:
     types: [labeled]
 
 concurrency:
-  group: symphony-dispatch
-  cancel-in-progress: false
+  group: symphony-${{ github.event.issue.number || 'dispatch' }}
+  cancel-in-progress: true
 
 jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -163,12 +163,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: "Workspace: create branch"
+      - name: "Workspace: create or resume branch"
+        id: workspace
         run: |
           BRANCH="issue/${{ matrix.number }}"
-          git checkout -b "$BRANCH" origin/main
           git config user.name "symphony[bot]"
           git config user.email "symphony[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code origin "refs/heads/$BRANCH" &>/dev/null; then
+            echo "Resuming existing branch: $BRANCH"
+            git checkout -b "$BRANCH" "origin/$BRANCH"
+            echo "is_rework=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Creating new branch: $BRANCH"
+            git checkout -b "$BRANCH" origin/main
+            echo "is_rework=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── PROJECT SETUP ────────────────────────────────
       # TODO: Uncomment for your stack (or use `make init` to configure)
@@ -235,6 +245,62 @@ jobs:
 
           echo "$RENDERED" > /tmp/symphony-prompt.md
           echo "Prompt rendered: $(wc -l < /tmp/symphony-prompt.md) lines"
+
+      # ── PROMPT: append PR review feedback (rework only) ─
+      - name: "Prompt: append PR review feedback"
+        if: steps.workspace.outputs.is_rework == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="issue/${{ matrix.number }}"
+          PR_NUMBER=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR found for branch $BRANCH — skipping review feedback"
+            exit 0
+          fi
+
+          echo "" >> /tmp/symphony-prompt.md
+          echo "---" >> /tmp/symphony-prompt.md
+          echo "" >> /tmp/symphony-prompt.md
+          echo "## PR Review Feedback" >> /tmp/symphony-prompt.md
+          echo "" >> /tmp/symphony-prompt.md
+          echo "This is a **rework** cycle. A PR already exists (#${PR_NUMBER})." >> /tmp/symphony-prompt.md
+          echo "Address the reviewer feedback below, then push your changes." >> /tmp/symphony-prompt.md
+          echo "" >> /tmp/symphony-prompt.md
+
+          # PR review comments (file-level and inline)
+          REVIEWS=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
+            --jq '.[] | "### \(.path):\(.line // .original_line // "general")\n\(.body)\n"' 2>/dev/null || true)
+
+          # PR-level review summaries
+          REVIEW_SUMMARIES=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+            --jq '.[] | select(.body != "") | "### Review by \(.user.login) (\(.state)):\n\(.body)\n"' 2>/dev/null || true)
+
+          # Issue-style comments on the PR
+          PR_COMMENTS=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq '.[] | select(.user.login != "github-actions[bot]") | "### Comment by \(.user.login):\n\(.body)\n"' 2>/dev/null || true)
+
+          if [ -n "$REVIEW_SUMMARIES" ]; then
+            echo "### Review summaries" >> /tmp/symphony-prompt.md
+            echo "$REVIEW_SUMMARIES" >> /tmp/symphony-prompt.md
+          fi
+
+          if [ -n "$REVIEWS" ]; then
+            echo "### Inline comments" >> /tmp/symphony-prompt.md
+            echo "$REVIEWS" >> /tmp/symphony-prompt.md
+          fi
+
+          if [ -n "$PR_COMMENTS" ]; then
+            echo "### Discussion" >> /tmp/symphony-prompt.md
+            echo "$PR_COMMENTS" >> /tmp/symphony-prompt.md
+          fi
+
+          if [ -z "$REVIEWS" ] && [ -z "$REVIEW_SUMMARIES" ] && [ -z "$PR_COMMENTS" ]; then
+            echo "_No review comments found — re-running agent on existing branch._" >> /tmp/symphony-prompt.md
+          fi
+
+          echo "Appended PR #${PR_NUMBER} review feedback to prompt"
 
       # ── EXECUTE: Claude Code ─────────────────────────
       - name: "Execute: Claude Code"
@@ -338,15 +404,30 @@ jobs:
         run: |
           BRANCH="issue/${{ matrix.number }}"
 
-          if git diff --quiet HEAD origin/main; then
+          # Check for changes against the branch starting point
+          DIFF_TARGET="origin/main"
+          if [ "${{ steps.workspace.outputs.is_rework }}" = "true" ]; then
+            DIFF_TARGET="origin/$BRANCH"
+          fi
+          if git diff --quiet HEAD "$DIFF_TARGET"; then
             echo "No changes produced by agent."
             echo "pr_created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # Check if a PR already exists for this branch (rework flow)
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url // empty' 2>/dev/null || true)
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Rework: pushing updates to existing PR: $EXISTING_PR"
+            git push origin "$BRANCH"
+            echo "pr_url=$EXISTING_PR" >> "$GITHUB_OUTPUT"
+            echo "pr_created=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git push -u origin "$BRANCH"
 
-          PR_URL=$(gh pr create \
+          PR_OUTPUT=$(gh pr create \
             --title "#${{ matrix.number }}: ${{ matrix.title }}" \
             --body "$(cat <<'EOF'
           ## Summary
@@ -375,14 +456,16 @@ jobs:
           EOF
           )" \
             --head "$BRANCH" \
-            --base main 2>&1)
+            --base main 2>&1) || true
 
-          if echo "$PR_URL" | grep -q "^https://"; then
+          PR_URL=$(echo "$PR_OUTPUT" | grep -o "https://github.com[^ ]*pull/[0-9]*" | head -1)
+
+          if [ -n "$PR_URL" ]; then
             echo "PR created: $PR_URL"
             echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
             echo "pr_created=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::PR creation failed: $PR_URL"
+            echo "::error::PR creation failed: $PR_OUTPUT"
             echo "pr_created=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
@@ -396,6 +479,7 @@ jobs:
           gh issue edit ${{ matrix.number }} \
             --repo "$GITHUB_REPOSITORY" \
             --remove-label "in-progress" \
+            --remove-label "agent" \
             --add-label "human-review"
 
           gh issue comment ${{ matrix.number }} \
@@ -438,13 +522,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue edit ${{ matrix.number }} \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "in-progress" \
-            --add-label "ready"
+          BRANCH="issue/${{ matrix.number }}"
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url // empty' 2>/dev/null || true)
 
-          gh issue comment ${{ matrix.number }} \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "**Symphony** agent run **failed** for this issue.
+          if [ -n "$EXISTING_PR" ]; then
+            # PR exists — agent work is done, remove agent label
+            gh issue edit ${{ matrix.number }} \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "in-progress" \
+              --remove-label "agent" \
+              --add-label "human-review"
+
+            gh issue comment ${{ matrix.number }} \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "**Symphony** agent run had errors, but a PR exists: $EXISTING_PR
+          [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          Moving to **human-review**."
+          else
+            gh issue edit ${{ matrix.number }} \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label "in-progress" \
+              --add-label "ready"
+
+            gh issue comment ${{ matrix.number }} \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "**Symphony** agent run **failed** for this issue.
           [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           Returning to **ready** for retry on next poll cycle."
+          fi
