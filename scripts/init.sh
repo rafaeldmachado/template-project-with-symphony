@@ -1842,6 +1842,36 @@ if [ "$MONITOR_CHOICE" != "None / I'll configure later" ]; then
     ok "Wrote MONITOR_DSN placeholder to .env (fill in later)"
   fi
 
+  # Copy provider-specific alert and dashboard configs, remove others
+  MONITOR_DIR="$ROOT_DIR/monitoring"
+  ALERT_PREFIX=""
+  DASH_PREFIX=""
+  case "$MONITOR_CHOICE" in
+    "Sentry")  ALERT_PREFIX="sentry"; DASH_PREFIX="sentry" ;;
+    "Datadog") ALERT_PREFIX="datadog"; DASH_PREFIX="datadog" ;;
+    "Grafana") ALERT_PREFIX="grafana"; DASH_PREFIX="grafana" ;;
+  esac
+
+  if [ -n "$ALERT_PREFIX" ]; then
+    # Remove non-matching provider configs from alerts/
+    for f in "$MONITOR_DIR/alerts/"*.json; do
+      [ -f "$f" ] || continue
+      case "$(basename "$f")" in
+        ${ALERT_PREFIX}*) ;; # keep
+        *) rm -f "$f" ;;
+      esac
+    done
+    # Remove non-matching provider configs from dashboards/
+    for f in "$MONITOR_DIR/dashboards/"*.json; do
+      [ -f "$f" ] || continue
+      case "$(basename "$f")" in
+        ${DASH_PREFIX}*) ;; # keep
+        *) rm -f "$f" ;;
+      esac
+    done
+    ok "Kept ${MONITOR_CHOICE} monitoring configs, removed other providers"
+  fi
+
   echo ""
   info "Monitoring configured: ${MONITOR_CHOICE}"
   [ -n "$MONITOR_DSN" ] && info "DSN stored as GitHub secret and in .env"

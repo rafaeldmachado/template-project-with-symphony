@@ -1,0 +1,60 @@
+{
+  "$schema": "https://docs.datadoghq.com/api/latest/monitors/",
+  "_comment": "Default Datadog monitors. Replace {{service}} with your service name.",
+  "monitors": [
+    {
+      "name": "High Error Rate - {{service}}",
+      "type": "query alert",
+      "query": "sum(last_5m):sum:trace.http.request.errors{service:{{service}},env:production}.as_count() / sum:trace.http.request.hits{service:{{service}},env:production}.as_count() > 0.05",
+      "message": "Error rate for {{service}} exceeded 5% over the last 5 minutes.\n\nCurrent value: {{value}}\n\n@slack-alerts @pagerduty",
+      "options": {
+        "thresholds": {
+          "critical": 0.05,
+          "warning": 0.02
+        },
+        "notify_no_data": false,
+        "renotify_interval": 300,
+        "evaluation_delay": 60,
+        "include_tags": true
+      },
+      "tags": ["service:{{service}}", "env:production", "team:backend"],
+      "priority": 2
+    },
+    {
+      "name": "High P95 Latency - {{service}}",
+      "type": "query alert",
+      "query": "percentile(last_5m):p95:trace.http.request.duration{service:{{service}},env:production} > 2",
+      "message": "P95 latency for {{service}} exceeded 2 seconds over the last 5 minutes.\n\nCurrent value: {{value}}s\n\n@slack-alerts",
+      "options": {
+        "thresholds": {
+          "critical": 2,
+          "warning": 1
+        },
+        "notify_no_data": false,
+        "renotify_interval": 600,
+        "evaluation_delay": 60,
+        "include_tags": true
+      },
+      "tags": ["service:{{service}}", "env:production", "team:backend"],
+      "priority": 3
+    },
+    {
+      "name": "Service Health Check Failure - {{service}}",
+      "type": "service check",
+      "query": "\"http.can_connect\".over(\"instance:{{service}}-health\",\"env:production\").by(\"host\",\"instance\").last(3).count_by_status()",
+      "message": "Health check for {{service}} has failed 3 consecutive times.\n\n@slack-alerts @pagerduty",
+      "options": {
+        "thresholds": {
+          "critical": 3,
+          "warning": 1,
+          "ok": 1
+        },
+        "notify_no_data": true,
+        "no_data_timeframe": 5,
+        "renotify_interval": 300
+      },
+      "tags": ["service:{{service}}", "env:production", "team:backend"],
+      "priority": 1
+    }
+  ]
+}

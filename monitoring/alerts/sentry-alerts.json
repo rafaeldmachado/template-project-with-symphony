@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.sentry.io/api/alerts/",
+  "_comment": "Default Sentry alert rules. Customize thresholds to match your traffic patterns.",
+  "rules": [
+    {
+      "name": "High Error Rate",
+      "conditions": [
+        {
+          "id": "sentry.rules.conditions.event_frequency.EventFrequencyCondition",
+          "interval": "5m",
+          "value": 10
+        }
+      ],
+      "actions": [
+        {
+          "id": "sentry.rules.actions.notify_event.NotifyEventAction"
+        }
+      ],
+      "actionMatch": "all",
+      "frequency": 300,
+      "environment": "production"
+    },
+    {
+      "name": "New Issue",
+      "conditions": [
+        {
+          "id": "sentry.rules.conditions.first_seen_event.FirstSeenEventCondition"
+        }
+      ],
+      "actions": [
+        {
+          "id": "sentry.rules.actions.notify_event.NotifyEventAction"
+        }
+      ],
+      "actionMatch": "all",
+      "frequency": 60,
+      "environment": "production"
+    },
+    {
+      "name": "Regression",
+      "conditions": [
+        {
+          "id": "sentry.rules.conditions.regression_event.RegressionEventCondition"
+        }
+      ],
+      "actions": [
+        {
+          "id": "sentry.rules.actions.notify_event.NotifyEventAction"
+        }
+      ],
+      "actionMatch": "all",
+      "frequency": 300,
+      "environment": "production"
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://docs.sentry.io/api/dashboards/",
+  "_comment": "Default Sentry dashboard. Import via Sentry API or recreate manually in the UI.",
+  "title": "Service Overview",
+  "widgets": [
+    {
+      "title": "Error Trends (24h)",
+      "displayType": "line",
+      "queries": [
+        {
+          "name": "Errors",
+          "fields": ["count()"],
+          "conditions": "!event.type:transaction",
+          "orderby": "-count()"
+        }
+      ],
+      "interval": "1h",
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 2,
+        "minH": 2
+      }
+    },
+    {
+      "title": "Most Frequent Issues",
+      "displayType": "table",
+      "queries": [
+        {
+          "name": "Top Issues",
+          "fields": ["issue", "title", "count()", "last_seen()"],
+          "conditions": "!event.type:transaction",
+          "orderby": "-count()"
+        }
+      ],
+      "limit": 10,
+      "layout": {
+        "x": 0,
+        "y": 2,
+        "w": 6,
+        "h": 3,
+        "minH": 2
+      }
+    },
+    {
+      "title": "Affected Users",
+      "displayType": "line",
+      "queries": [
+        {
+          "name": "Users",
+          "fields": ["count_unique(user)"],
+          "conditions": "!event.type:transaction",
+          "orderby": "-count_unique(user)"
+        }
+      ],
+      "interval": "1h",
+      "layout": {
+        "x": 4,
+        "y": 0,
+        "w": 2,
+        "h": 2,
+        "minH": 2
+      }
+    },
+    {
+      "title": "Errors by Browser",
+      "displayType": "bar",
+      "queries": [
+        {
+          "name": "Browsers",
+          "fields": ["browser.name", "count()"],
+          "conditions": "!event.type:transaction",
+          "orderby": "-count()"
+        }
+      ],
+      "layout": {
+        "x": 0,
+        "y": 5,
+        "w": 3,
+        "h": 2,
+        "minH": 2
+      }
+    },
+    {
+      "title": "Transaction Duration (P95)",
+      "displayType": "line",
+      "queries": [
+        {
+          "name": "P95",
+          "fields": ["p95(transaction.duration)"],
+          "conditions": "event.type:transaction",
+          "orderby": "-p95(transaction.duration)"
+        }
+      ],
+      "interval": "1h",
+      "layout": {
+        "x": 3,
+        "y": 5,
+        "w": 3,
+        "h": 2,
+        "minH": 2
+      }
+    }
+  ]
+}

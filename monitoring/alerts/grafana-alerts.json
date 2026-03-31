@@ -1,0 +1,140 @@
+{
+  "_comment": "Default Grafana alert rules. Adjust datasourceUid and thresholds for your environment.",
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "Service Alerts",
+      "folder": "alerts",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "error-rate-alert",
+          "title": "Error Rate Threshold",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "datasourceUid": "prometheus",
+              "model": {
+                "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+                "intervalMs": 60000
+              },
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "threshold",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [0.05]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "5m",
+          "labels": {
+            "severity": "critical"
+          },
+          "annotations": {
+            "summary": "Error rate exceeded 5%",
+            "description": "The 5xx error rate has been above 5% for the last 5 minutes. Current value: {{ $value | printf \"%.2f\" }}%"
+          }
+        },
+        {
+          "uid": "p95-latency-alert",
+          "title": "Response Time P95",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "datasourceUid": "prometheus",
+              "model": {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+                "intervalMs": 60000
+              },
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "threshold",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [2]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "5m",
+          "labels": {
+            "severity": "warning"
+          },
+          "annotations": {
+            "summary": "P95 response time exceeded 2s",
+            "description": "The P95 response time has been above 2 seconds for the last 5 minutes. Current value: {{ $value | printf \"%.2f\" }}s"
+          }
+        },
+        {
+          "uid": "uptime-alert",
+          "title": "Uptime / Availability",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "datasourceUid": "prometheus",
+              "model": {
+                "expr": "up{job=\"app\"}",
+                "intervalMs": 60000
+              },
+              "relativeTimeRange": {
+                "from": 60,
+                "to": 0
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "type": "threshold",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "lt",
+                      "params": [1]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "for": "2m",
+          "labels": {
+            "severity": "critical"
+          },
+          "annotations": {
+            "summary": "Service is down",
+            "description": "The service has been unreachable for the last 2 minutes."
+          }
+        }
+      ]
+    }
+  ]
+}
