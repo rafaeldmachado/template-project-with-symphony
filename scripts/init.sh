@@ -89,6 +89,7 @@ SETUP_CMD=""
 CI_SETUP_STEPS=""
 PKG_INIT_CMD=""
 DEPLOY_PROVIDER=""
+DEPLOY_MODE=""
 AGENT_CHOICE=""
 MONITOR_CHOICE=""
 CREATE_PROJECT=false
@@ -1292,43 +1293,89 @@ fi
 header "5/8  Deploys"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-DEPLOY_PROVIDER=$(choose "PR preview deploy provider:" \
+# ── Step 4a: Choose deploy provider ─────────────────
+DEPLOY_PROVIDER=$(choose "Deploy provider:" \
   "Vercel" \
   "Netlify" \
   "Cloudflare Pages" \
   "Fly.io" \
+  "Custom" \
   "None / I'll configure later")
 
 DEPLOY_TOKEN=""
 DEPLOY_PROJECT_ID=""
 
 case "$DEPLOY_PROVIDER" in
-  "Vercel")
-    DEPLOY_PROVIDER_KEY="vercel"
-    info "You can find your Vercel token at: https://vercel.com/account/tokens"
-    DEPLOY_TOKEN=$(ask "Vercel token (leave empty to set later)" "")
-    DEPLOY_PROJECT_ID=$(ask "Vercel project ID (leave empty to set later)" "")
+  "Vercel"|"Netlify"|"Cloudflare Pages"|"Fly.io")
+    # Set provider key
+    case "$DEPLOY_PROVIDER" in
+      "Vercel")           DEPLOY_PROVIDER_KEY="vercel" ;;
+      "Netlify")          DEPLOY_PROVIDER_KEY="netlify" ;;
+      "Cloudflare Pages") DEPLOY_PROVIDER_KEY="cloudflare" ;;
+      "Fly.io")           DEPLOY_PROVIDER_KEY="fly" ;;
+    esac
+
+    # ── Step 4b: Choose deploy mode ──────────────────
+    echo ""
+    if [ "$DEPLOY_PROVIDER" = "Fly.io" ]; then
+      warn "Fly.io has limited native Git integration."
+      info "  Native mode: only production deploys on main are automatic."
+      info "  PR previews require GitHub Actions mode."
+      echo ""
+    fi
+
+    info "Deploy mode options:"
+    echo -e "  ${CYAN}Native:${RESET}  The service's own Git hooks handle production deploys"
+    echo -e "           on main and preview deploys on PRs automatically."
+    echo -e "  ${CYAN}Scripts:${RESET} Full control via GitHub Actions. Use for custom build"
+    echo -e "           steps, multi-service orchestration, or env-specific logic."
+    echo ""
+
+    DEPLOY_MODE_CHOICE=$(choose "Deploy mode:" \
+      "Native service integration (recommended)" \
+      "GitHub Actions scripts")
+
+    case "$DEPLOY_MODE_CHOICE" in
+      "Native service integration"*) DEPLOY_MODE="native" ;;
+      "GitHub Actions scripts"*)     DEPLOY_MODE="scripts" ;;
+    esac
+
+    # ── Collect credentials ────────────────────────────
+    echo ""
+    case "$DEPLOY_PROVIDER" in
+      "Vercel")
+        info "You can find your Vercel token at: https://vercel.com/account/tokens"
+        DEPLOY_TOKEN=$(ask "Vercel token (leave empty to set later)" "")
+        if [ "$DEPLOY_MODE" = "scripts" ]; then
+          DEPLOY_PROJECT_ID=$(ask "Vercel project ID (leave empty to set later)" "")
+        fi
+        ;;
+      "Netlify")
+        info "You can find your Netlify token at: https://app.netlify.com/user/applications#personal-access-tokens"
+        DEPLOY_TOKEN=$(ask "Netlify token (leave empty to set later)" "")
+        DEPLOY_PROJECT_ID=$(ask "Netlify site ID (leave empty to set later)" "")
+        ;;
+      "Cloudflare Pages")
+        info "You can find your Cloudflare API token at: https://dash.cloudflare.com/profile/api-tokens"
+        DEPLOY_TOKEN=$(ask "Cloudflare API token (leave empty to set later)" "")
+        DEPLOY_PROJECT_ID=$(ask "Cloudflare Pages project name (leave empty to set later)" "")
+        ;;
+      "Fly.io")
+        info "You can get a Fly.io token with: fly tokens create deploy"
+        DEPLOY_TOKEN=$(ask "Fly.io deploy token (leave empty to set later)" "")
+        DEPLOY_PROJECT_ID=$(ask "Fly.io app name (leave empty to set later)" "")
+        ;;
+    esac
     ;;
-  "Netlify")
-    DEPLOY_PROVIDER_KEY="netlify"
-    info "You can find your Netlify token at: https://app.netlify.com/user/applications#personal-access-tokens"
-    DEPLOY_TOKEN=$(ask "Netlify token (leave empty to set later)" "")
-    DEPLOY_PROJECT_ID=$(ask "Netlify site ID (leave empty to set later)" "")
-    ;;
-  "Cloudflare Pages")
-    DEPLOY_PROVIDER_KEY="cloudflare"
-    info "You can find your Cloudflare API token at: https://dash.cloudflare.com/profile/api-tokens"
-    DEPLOY_TOKEN=$(ask "Cloudflare API token (leave empty to set later)" "")
-    DEPLOY_PROJECT_ID=$(ask "Cloudflare Pages project name (leave empty to set later)" "")
-    ;;
-  "Fly.io")
-    DEPLOY_PROVIDER_KEY="fly"
-    info "You can get a Fly.io token with: fly tokens create deploy"
-    DEPLOY_TOKEN=$(ask "Fly.io deploy token (leave empty to set later)" "")
-    DEPLOY_PROJECT_ID=$(ask "Fly.io app name (leave empty to set later)" "")
+  "Custom")
+    DEPLOY_PROVIDER_KEY="custom"
+    DEPLOY_MODE="custom"
+    info "Custom provider selected. Script stubs will be kept for you to configure."
+    info "See docs/DEPLOY.md for the contract your scripts must follow."
     ;;
   *)
     DEPLOY_PROVIDER_KEY=""
+    DEPLOY_MODE="none"
     ;;
 esac
 
@@ -2160,6 +2207,348 @@ if [ "$CREATE_PROJECT" = true ] && [ -n "$GITHUB_REPO" ]; then
   fi
 fi
 
+# ── 11c. Configure deploy mode ──────────────────────
+if [ -n "$DEPLOY_PROVIDER_KEY" ] && [ "$DEPLOY_MODE" != "custom" ] && [ "$DEPLOY_MODE" != "none" ]; then
+  echo ""
+
+  case "$DEPLOY_MODE" in
+    native)
+      # ── Native mode: service handles deploys via Git integration ──
+      info "Configuring native ${DEPLOY_PROVIDER} integration..."
+
+      # Store DEPLOY_TOKEN as GitHub secret
+      if [ -n "$DEPLOY_TOKEN" ] && [ -n "$GITHUB_REPO" ]; then
+        SECRET_NAME="DEPLOY_TOKEN"
+        [ "$DEPLOY_PROVIDER_KEY" = "fly" ] && SECRET_NAME="FLY_API_TOKEN"
+        echo "$DEPLOY_TOKEN" | gh secret set "$SECRET_NAME" --repo "$GITHUB_REPO" 2>/dev/null && \
+          ok "Set repo secret $SECRET_NAME" || \
+          warn "Failed to set $SECRET_NAME — set it manually in repo Settings > Secrets"
+      elif [ -n "$GITHUB_REPO" ]; then
+        SECRET_NAME="DEPLOY_TOKEN"
+        [ "$DEPLOY_PROVIDER_KEY" = "fly" ] && SECRET_NAME="FLY_API_TOKEN"
+        warn "Add $SECRET_NAME to your GitHub repo secrets"
+      fi
+
+      # Store DEPLOY_MODE as GitHub repo variable
+      if [ -n "$GITHUB_REPO" ]; then
+        gh variable set DEPLOY_MODE --body "native" --repo "$GITHUB_REPO" 2>/dev/null && \
+          ok "Set repo variable DEPLOY_MODE=native" || \
+          warn "Failed to set DEPLOY_MODE variable"
+      fi
+
+      # Run provider-specific link/init CLI
+      case "$DEPLOY_PROVIDER_KEY" in
+        vercel)
+          if command -v vercel &>/dev/null; then
+            if confirm "Run 'vercel link' to connect this repo to Vercel?"; then
+              VERCEL_LINK_ARGS=""
+              [ -n "$DEPLOY_TOKEN" ] && VERCEL_LINK_ARGS="--token $DEPLOY_TOKEN"
+              vercel link $VERCEL_LINK_ARGS --yes 2>&1 || warn "vercel link failed — run it manually later"
+            fi
+          else
+            warn "Vercel CLI not found. Install with: npm i -g vercel"
+            info "Then run: vercel link"
+          fi
+
+          # Generate vercel.json
+          if [ ! -f "$ROOT_DIR/vercel.json" ]; then
+            cat > "$ROOT_DIR/vercel.json" <<'VERCEL_NATIVE_EOF'
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm ci"
+}
+VERCEL_NATIVE_EOF
+            ok "Generated vercel.json (edit buildCommand/outputDirectory for your stack)"
+          fi
+          ;;
+
+        netlify)
+          if command -v netlify &>/dev/null; then
+            if confirm "Run 'netlify init' to connect this repo to Netlify?"; then
+              [ -n "$DEPLOY_TOKEN" ] && export NETLIFY_AUTH_TOKEN="$DEPLOY_TOKEN"
+              netlify init 2>&1 || warn "netlify init failed — run it manually later"
+            fi
+          else
+            warn "Netlify CLI not found. Install with: npm i -g netlify-cli"
+            info "Then run: netlify init"
+          fi
+
+          # Generate netlify.toml if not created by netlify init
+          if [ ! -f "$ROOT_DIR/netlify.toml" ]; then
+            cat > "$ROOT_DIR/netlify.toml" <<'NETLIFY_NATIVE_EOF'
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# PR deploy previews are handled automatically by Netlify's Git integration
+NETLIFY_NATIVE_EOF
+            ok "Generated netlify.toml (edit command/publish for your stack)"
+          fi
+          ;;
+
+        cloudflare)
+          if command -v wrangler &>/dev/null; then
+            if confirm "Run 'wrangler pages project create' to set up Cloudflare Pages?"; then
+              [ -n "$DEPLOY_TOKEN" ] && export CLOUDFLARE_API_TOKEN="$DEPLOY_TOKEN"
+              CF_PROJECT="${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
+              wrangler pages project create "$CF_PROJECT" --production-branch main 2>&1 || \
+                warn "wrangler pages project create failed — run it manually later"
+            fi
+          else
+            warn "Wrangler CLI not found. Install with: npm i -g wrangler"
+            info "Then run: wrangler pages project create ${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
+          fi
+
+          # Generate wrangler.toml
+          if [ ! -f "$ROOT_DIR/wrangler.toml" ]; then
+            CF_PROJECT="${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
+            cat > "$ROOT_DIR/wrangler.toml" <<WRANGLER_NATIVE_EOF
+name = "${CF_PROJECT}"
+compatibility_date = "$(date +%Y-%m-%d)"
+pages_build_output_dir = "dist"
+
+# Cloudflare Pages handles PR previews and production deploys via Git integration
+WRANGLER_NATIVE_EOF
+            ok "Generated wrangler.toml (edit pages_build_output_dir for your stack)"
+          fi
+          ;;
+
+        fly)
+          if command -v fly &>/dev/null; then
+            if confirm "Run 'fly launch' to set up your Fly.io app?"; then
+              [ -n "$DEPLOY_TOKEN" ] && export FLY_API_TOKEN="$DEPLOY_TOKEN"
+              fly launch --no-deploy 2>&1 || warn "fly launch failed — run it manually later"
+            fi
+          else
+            warn "Fly CLI not found. Install from: https://fly.io/docs/hands-on/install-flyctl/"
+            info "Then run: fly launch --no-deploy"
+          fi
+
+          echo ""
+          warn "Fly.io native mode: only production deploys on main are automatic."
+          info "PR preview deploys are not available in native mode."
+          ;;
+      esac
+
+      # Remove deploy workflows (not needed in native mode)
+      for wf in pr-deploy.yml pr-cleanup.yml deploy-production.yml; do
+        if [ -f "$ROOT_DIR/.github/workflows/$wf" ]; then
+          rm "$ROOT_DIR/.github/workflows/$wf"
+        fi
+      done
+      ok "Removed deploy workflows (native mode — service handles deploys)"
+
+      # Replace deploy scripts with stubs (not needed)
+      for script in pr-preview.sh pr-cleanup.sh production.sh; do
+        if [ -f "$ROOT_DIR/scripts/deploy/$script" ]; then
+          cat > "$ROOT_DIR/scripts/deploy/$script" <<NATIVE_STUB_EOF
+#!/usr/bin/env bash
+# Deploy mode: native
+# ${DEPLOY_PROVIDER} handles deploys via its Git integration.
+# This script is not used. See docs/DEPLOY.md for details.
+echo "Deploy mode is 'native'. ${DEPLOY_PROVIDER} handles deploys automatically."
+echo "See docs/DEPLOY.md for details."
+exit 0
+NATIVE_STUB_EOF
+          chmod +x "$ROOT_DIR/scripts/deploy/$script"
+        fi
+      done
+      ok "Replaced deploy scripts with stubs (not needed in native mode)"
+
+      # Summary
+      echo ""
+      echo -e "  ${BOLD}Deploy summary (native mode):${RESET}"
+      echo -e "    Provider: ${CYAN}${DEPLOY_PROVIDER}${RESET}"
+      echo -e "    Mode:     ${CYAN}native — service handles deploys via Git integration${RESET}"
+      echo -e "    Workflows removed: pr-deploy.yml, pr-cleanup.yml, deploy-production.yml"
+      case "$DEPLOY_PROVIDER_KEY" in
+        vercel)     [ -f "$ROOT_DIR/vercel.json" ] && echo -e "    Config:   vercel.json" ;;
+        netlify)    [ -f "$ROOT_DIR/netlify.toml" ] && echo -e "    Config:   netlify.toml" ;;
+        cloudflare) [ -f "$ROOT_DIR/wrangler.toml" ] && echo -e "    Config:   wrangler.toml" ;;
+        fly)        [ -f "$ROOT_DIR/fly.toml" ] && echo -e "    Config:   fly.toml" ;;
+      esac
+      ;;
+
+    scripts)
+      # ── Scripts mode: GitHub Actions handle deploys ──
+      info "Configuring GitHub Actions deploy mode for ${DEPLOY_PROVIDER}..."
+
+      # Store DEPLOY_TOKEN as GitHub secret
+      if [ -n "$DEPLOY_TOKEN" ] && [ -n "$GITHUB_REPO" ]; then
+        echo "$DEPLOY_TOKEN" | gh secret set DEPLOY_TOKEN --repo "$GITHUB_REPO" 2>/dev/null && \
+          ok "Set repo secret DEPLOY_TOKEN" || \
+          warn "Failed to set DEPLOY_TOKEN — set it manually in repo Settings > Secrets"
+      elif [ -n "$GITHUB_REPO" ]; then
+        warn "Add DEPLOY_TOKEN to your GitHub repo secrets"
+      fi
+
+      # Store DEPLOY_PROVIDER and DEPLOY_PROJECT_ID as GitHub repo variables
+      if [ -n "$GITHUB_REPO" ]; then
+        gh variable set DEPLOY_PROVIDER --body "$DEPLOY_PROVIDER_KEY" --repo "$GITHUB_REPO" 2>/dev/null && \
+          ok "Set repo variable DEPLOY_PROVIDER=$DEPLOY_PROVIDER_KEY" || \
+          warn "Failed to set DEPLOY_PROVIDER variable"
+
+        if [ -n "$DEPLOY_PROJECT_ID" ]; then
+          gh variable set DEPLOY_PROJECT_ID --body "$DEPLOY_PROJECT_ID" --repo "$GITHUB_REPO" 2>/dev/null && \
+            ok "Set repo variable DEPLOY_PROJECT_ID=$DEPLOY_PROJECT_ID" || \
+            warn "Failed to set DEPLOY_PROJECT_ID variable"
+        fi
+
+        gh variable set DEPLOY_MODE --body "scripts" --repo "$GITHUB_REPO" 2>/dev/null && \
+          ok "Set repo variable DEPLOY_MODE=scripts" || \
+          warn "Failed to set DEPLOY_MODE variable"
+      fi
+
+      # Uncomment build step in deploy workflows if CI steps are known
+      if [ -n "$CI_SETUP_STEPS" ]; then
+        for wf in pr-deploy.yml deploy-production.yml; do
+          WF_FILE="$ROOT_DIR/.github/workflows/$wf"
+          if [ -f "$WF_FILE" ]; then
+            DEPLOY_WF_MARKER="      # TODO: Uncomment and configure for your"
+            if grep -q "$DEPLOY_WF_MARKER" "$WF_FILE" 2>/dev/null; then
+              DEPLOY_WF_TEMP=$(mktemp)
+              if CI_SETUP_STEPS_AWK="$CI_SETUP_STEPS" awk -v marker="$DEPLOY_WF_MARKER" '
+                $0 ~ marker {
+                  print ENVIRON["CI_SETUP_STEPS_AWK"]
+                  while (getline > 0 && /^      # /) {}
+                  print
+                  next
+                }
+                { print }
+              ' "$WF_FILE" > "$DEPLOY_WF_TEMP" && [ -s "$DEPLOY_WF_TEMP" ]; then
+                mv "$DEPLOY_WF_TEMP" "$WF_FILE"
+              else
+                rm -f "$DEPLOY_WF_TEMP"
+              fi
+            fi
+          fi
+        done
+        ok "Configured build steps in deploy workflows"
+      fi
+
+      # Optionally generate provider config file
+      case "$DEPLOY_PROVIDER_KEY" in
+        vercel)
+          if [ ! -f "$ROOT_DIR/vercel.json" ] && confirm "Generate vercel.json with defaults?"; then
+            cat > "$ROOT_DIR/vercel.json" <<'VERCEL_SCRIPTS_EOF'
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm ci"
+}
+VERCEL_SCRIPTS_EOF
+            ok "Generated vercel.json"
+          fi
+          ;;
+        netlify)
+          if [ ! -f "$ROOT_DIR/netlify.toml" ] && confirm "Generate netlify.toml with defaults?"; then
+            cat > "$ROOT_DIR/netlify.toml" <<'NETLIFY_SCRIPTS_EOF'
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+NETLIFY_SCRIPTS_EOF
+            ok "Generated netlify.toml"
+          fi
+          ;;
+        cloudflare)
+          if [ ! -f "$ROOT_DIR/wrangler.toml" ] && confirm "Generate wrangler.toml with defaults?"; then
+            CF_PROJECT_S="${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
+            cat > "$ROOT_DIR/wrangler.toml" <<WRANGLER_SCRIPTS_EOF
+name = "${CF_PROJECT_S}"
+compatibility_date = "$(date +%Y-%m-%d)"
+pages_build_output_dir = "dist"
+WRANGLER_SCRIPTS_EOF
+            ok "Generated wrangler.toml"
+          fi
+          ;;
+        fly)
+          if [ ! -f "$ROOT_DIR/fly.toml" ] && confirm "Generate fly.toml with defaults?"; then
+            FLY_APP_S="${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
+            cat > "$ROOT_DIR/fly.toml" <<FLY_SCRIPTS_EOF
+app = "${FLY_APP_S}"
+primary_region = "iad"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+FLY_SCRIPTS_EOF
+            ok "Generated fly.toml"
+          fi
+          ;;
+      esac
+
+      ok "Deploy workflows active: pr-deploy.yml, pr-cleanup.yml, deploy-production.yml"
+
+      # Summary
+      echo ""
+      echo -e "  ${BOLD}Deploy summary (scripts mode):${RESET}"
+      echo -e "    Provider: ${CYAN}${DEPLOY_PROVIDER}${RESET}"
+      echo -e "    Mode:     ${CYAN}scripts — GitHub Actions handle deploys${RESET}"
+      echo -e "    Workflows: pr-deploy.yml, pr-cleanup.yml, deploy-production.yml"
+      echo -e "    Scripts:   scripts/deploy/pr-preview.sh, pr-cleanup.sh, production.sh"
+      ;;
+  esac
+
+elif [ "$DEPLOY_MODE" = "custom" ]; then
+  # ── Custom: keep stubs, print instructions ──
+  echo ""
+  info "Custom deploy provider: script stubs and workflows kept for manual configuration."
+  info "Edit scripts/deploy/pr-preview.sh and pr-cleanup.sh with your deploy logic."
+  info "Contract: write the preview URL to .deploy-artifacts/preview-url.txt"
+
+  if [ -n "$GITHUB_REPO" ]; then
+    gh variable set DEPLOY_PROVIDER --body "custom" --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo variable DEPLOY_PROVIDER=custom" || true
+    gh variable set DEPLOY_MODE --body "scripts" --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo variable DEPLOY_MODE=scripts" || true
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}Deploy summary (custom):${RESET}"
+  echo -e "    Provider: ${CYAN}Custom${RESET}"
+  echo -e "    Workflows and script stubs kept — configure manually"
+
+elif [ "$DEPLOY_MODE" = "none" ]; then
+  # ── None: remove deploy workflows and scripts ──
+  echo ""
+  info "No deploy provider selected. Removing deploy workflows and scripts..."
+
+  for wf in pr-deploy.yml pr-cleanup.yml deploy-production.yml; do
+    if [ -f "$ROOT_DIR/.github/workflows/$wf" ]; then
+      rm "$ROOT_DIR/.github/workflows/$wf"
+    fi
+  done
+
+  for script in pr-preview.sh pr-cleanup.sh production.sh; do
+    if [ -f "$ROOT_DIR/scripts/deploy/$script" ]; then
+      cat > "$ROOT_DIR/scripts/deploy/$script" <<'NONE_STUB_EOF'
+#!/usr/bin/env bash
+# No deploy provider configured.
+# Run 'make init' again or configure manually — see docs/DEPLOY.md
+echo "No deploy provider configured. See docs/DEPLOY.md for setup."
+exit 0
+NONE_STUB_EOF
+      chmod +x "$ROOT_DIR/scripts/deploy/$script"
+    fi
+  done
+
+  ok "Removed deploy workflows and cleared deploy scripts"
+fi
+
 # ── 12. Initialize stack package manager ─────────────
 if [ -n "$PKG_INIT_CMD" ]; then
   echo ""
@@ -2382,7 +2771,11 @@ echo -e "  Database:   ${CYAN}${DB_ENGINE_CHOICE:-None}${RESET}"
 [ -n "$DB_ORM" ] && [ "$DB_ORM" != "none" ] && echo -e "  ORM:        ${CYAN}${DB_ORM_CHOICE}${RESET}"
 [ -n "$DB_HOSTING" ] && echo -e "  DB Hosting: ${CYAN}${DB_HOSTING}${RESET}"
 echo -e "  Agent:      ${CYAN}${AGENT_CHOICE}${RESET}"
-echo -e "  Deploy:     ${CYAN}${DEPLOY_PROVIDER}${RESET}"
+if [ -n "$DEPLOY_PROVIDER_KEY" ]; then
+  echo -e "  Deploy:     ${CYAN}${DEPLOY_PROVIDER} (${DEPLOY_MODE} mode)${RESET}"
+else
+  echo -e "  Deploy:     ${CYAN}${DEPLOY_PROVIDER}${RESET}"
+fi
 echo -e "  Monitoring: ${CYAN}${MONITOR_CHOICE}${RESET}"
 echo -e "  Runner:     ${CYAN}$([ "$SETUP_RUNNER" = true ] && echo "self-hosted (with fallback)" || echo "GitHub-hosted only")${RESET}"
 [ -n "$GITHUB_REPO" ] && echo -e "  GitHub:     ${CYAN}${GITHUB_REPO}${RESET}"
@@ -2395,8 +2788,14 @@ echo "  2. Run:  make check              (verify everything works)"
 echo "  3. Read: docs/SETUP.md           (finish GitHub secrets/variables)"
 
 if [ -n "$DEPLOY_PROVIDER_KEY" ]; then
-  echo "  4. Read: docs/DEPLOY.md           (configure $DEPLOY_PROVIDER deploys)"
-  echo "  5. Edit: scripts/deploy/pr-preview.sh  (uncomment $DEPLOY_PROVIDER_KEY block)"
+  echo "  4. Read: docs/DEPLOY.md           (deploy reference)"
+  if [ "$DEPLOY_MODE" = "native" ]; then
+    echo "     → Native mode: ${DEPLOY_PROVIDER} handles deploys via Git integration"
+  elif [ "$DEPLOY_MODE" = "scripts" ]; then
+    echo "     → Scripts mode: GitHub Actions handle deploys via scripts/deploy/"
+  elif [ "$DEPLOY_MODE" = "custom" ]; then
+    echo "     → Custom mode: edit scripts/deploy/ with your deploy logic"
+  fi
 fi
 
 if [ "${MONITOR_CHOICE:-}" != "None / I'll configure later" ] && [ -n "${MONITOR_CHOICE:-}" ]; then
