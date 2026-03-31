@@ -1,0 +1,38 @@
+name: Production Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Project-specific setup ──────────────────────────
+      # TODO: Uncomment and configure for your stack
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version: '22'
+      #     cache: 'npm'
+      # - run: npm ci && npm run build
+
+      - name: Deploy to production
+        id: deploy
+        run: ./scripts/deploy/production.sh
+        env:
+          DEPLOY_PROVIDER: ${{ vars.DEPLOY_PROVIDER }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          DEPLOY_PROJECT_ID: ${{ vars.DEPLOY_PROJECT_ID }}

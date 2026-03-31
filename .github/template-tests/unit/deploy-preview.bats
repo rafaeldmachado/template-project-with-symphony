@@ -34,10 +34,19 @@ teardown() {
   [ -d "$TEST_REPO/.deploy-artifacts" ]
 }
 
-@test "fails for unconfigured provider" {
+@test "fails when required env vars are missing" {
   export DEPLOY_PROVIDER=vercel
+  unset DEPLOY_TOKEN 2>/dev/null || true
 
   run bash "$TEST_REPO/scripts/deploy/pr-preview.sh" 123
   assert_failure
-  assert_output --partial "not configured"
+  assert_output --partial "DEPLOY_TOKEN is required"
+}
+
+@test "fails for unknown provider" {
+  export DEPLOY_PROVIDER=unknown
+
+  run bash "$TEST_REPO/scripts/deploy/pr-preview.sh" 123
+  assert_failure
+  assert_output --partial "Unknown DEPLOY_PROVIDER"
 }

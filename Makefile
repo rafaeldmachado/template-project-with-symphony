@@ -1,6 +1,6 @@
 .PHONY: help init teardown setup check lint test test-e2e structure worktree worktree-cleanup \
        gc gc-branches gc-worktrees gc-deploys gc-artifacts \
-       deploy-preview deploy-cleanup test-template \
+       deploy-preview deploy-cleanup deploy-prod test-template \
        setup-runner runner-start runner-stop runner-status runner-remove
 
 SHELL := /bin/bash
@@ -100,6 +100,9 @@ ifndef PR
 	$(error PR is required. Usage: make deploy-cleanup PR=123)
 endif
 	@./scripts/deploy/pr-cleanup.sh $(PR)
+
+deploy-prod: ## Deploy to production
+	@./scripts/deploy/production.sh
 
 # ──────────────────────────────────────────────
 # Self-hosted runner
