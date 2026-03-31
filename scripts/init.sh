@@ -94,6 +94,15 @@ MONITOR_CHOICE=""
 CREATE_PROJECT=false
 PROJECT_BOARD_URL=""
 PROJECT_NUMBER=""
+DB_ENGINE=""
+DB_ENGINE_CHOICE=""
+DB_ORM=""
+DB_ORM_CHOICE=""
+DB_HOSTING=""
+DB_HOSTING_CHOICE=""
+DATABASE_URL=""
+DB_CLOUD_PROVIDER=""
+DB_API_KEY=""
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo -e "${BOLD}"
@@ -104,14 +113,14 @@ echo "  └───────────────────────
 echo -e "${RESET}"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "1/7  Project basics"
+header "1/8  Project basics"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 PROJECT_NAME=$(ask "Project name" "$(basename "$ROOT_DIR")")
 PROJECT_DESC=$(ask "One-line description" "")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "2/7  Stack"
+header "2/8  Stack"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 STACK_CATEGORY=$(choose "Choose a category:" \
@@ -964,7 +973,274 @@ else
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "3/7  GitHub"
+header "3/8  Database & ORM"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# ── 3a. Database engine ───────────────────────────
+DB_ENGINE_CHOICE=$(choose "Choose a database:" \
+  "PostgreSQL" \
+  "MySQL / MariaDB" \
+  "SQLite" \
+  "MongoDB" \
+  "Redis (as primary data store)" \
+  "None (skip database setup)")
+
+case "$DB_ENGINE_CHOICE" in
+  "PostgreSQL")                    DB_ENGINE="postgres" ;;
+  "MySQL / MariaDB")               DB_ENGINE="mysql" ;;
+  "SQLite")                        DB_ENGINE="sqlite" ;;
+  "MongoDB")                       DB_ENGINE="mongodb" ;;
+  "Redis (as primary data store)") DB_ENGINE="redis" ;;
+  *)                               DB_ENGINE="" ;;
+esac
+
+if [ -n "$DB_ENGINE" ]; then
+  # ── 3b. ORM / query layer ───────────────────────
+  # Determine the effective backend stack for ORM selection
+  EFFECTIVE_STACK="$STACK"
+  [ "$IS_FULLSTACK" = true ] && EFFECTIVE_STACK="$BACKEND_STACK"
+
+  # Classify the stack language
+  STACK_LANG=""
+  case "$EFFECTIVE_STACK" in
+    "Next.js (React)"|"Nuxt (Vue)"|"SvelteKit"|"Astro"|"Remix"|"Hono (API)"|"Express (TypeScript)"|"Node.js (TypeScript, no framework)"|"Node.js (JavaScript, no framework)")
+      STACK_LANG="node" ;;
+    "FastAPI"|"Django"|"Flask"|"Python (no framework)")
+      STACK_LANG="python" ;;
+    "Go")
+      STACK_LANG="go" ;;
+    "Rails"|"Ruby (no framework)")
+      STACK_LANG="ruby" ;;
+    "Axum (API)"|"Rust (no framework)")
+      STACK_LANG="rust" ;;
+    "Phoenix"|"Elixir (no framework)")
+      STACK_LANG="elixir" ;;
+    "Spring Boot (Kotlin)"|"Spring Boot (Java)")
+      STACK_LANG="java" ;;
+  esac
+
+  IS_SQL=true
+  [[ "$DB_ENGINE" == "mongodb" || "$DB_ENGINE" == "redis" ]] && IS_SQL=false
+
+  # Offer ORM choices based on stack language and database type
+  if [ "$STACK_LANG" = "node" ] && [ "$IS_SQL" = true ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "Prisma (recommended)" \
+      "Drizzle" \
+      "TypeORM" \
+      "Knex.js (query builder only)" \
+      "None (raw driver)")
+  elif [ "$STACK_LANG" = "node" ] && [ "$DB_ENGINE" = "mongodb" ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "Mongoose" \
+      "Prisma" \
+      "None (native driver)")
+  elif [ "$STACK_LANG" = "python" ] && [ "$IS_SQL" = true ]; then
+    if [ "$EFFECTIVE_STACK" = "Django" ]; then
+      DB_ORM_CHOICE="Django ORM (auto-selected)"
+      info "Django ORM auto-selected for Django projects."
+    else
+      DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+        "SQLAlchemy (recommended)" \
+        "Tortoise ORM" \
+        "None (raw driver)")
+    fi
+  elif [ "$STACK_LANG" = "python" ] && [ "$DB_ENGINE" = "mongodb" ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "Motor (async) / PyMongo" \
+      "MongoEngine" \
+      "None")
+  elif [ "$STACK_LANG" = "go" ] && [ "$IS_SQL" = true ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "GORM" \
+      "sqlx" \
+      "Ent" \
+      "None (database/sql)")
+  elif [ "$STACK_LANG" = "go" ] && [ "$DB_ENGINE" = "mongodb" ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "mongo-go-driver" \
+      "None")
+  elif [ "$STACK_LANG" = "ruby" ] && [ "$IS_SQL" = true ]; then
+    DB_ORM_CHOICE="ActiveRecord (auto-selected)"
+    info "ActiveRecord auto-selected for Ruby projects."
+  elif [ "$STACK_LANG" = "rust" ] && [ "$IS_SQL" = true ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "Diesel" \
+      "SQLx" \
+      "SeaORM")
+  elif [ "$STACK_LANG" = "elixir" ] && [ "$IS_SQL" = true ]; then
+    DB_ORM_CHOICE="Ecto (auto-selected)"
+    info "Ecto auto-selected for Elixir projects."
+  elif [ "$STACK_LANG" = "java" ] && [ "$IS_SQL" = true ]; then
+    DB_ORM_CHOICE=$(choose "ORM / query layer:" \
+      "Spring Data JPA / Hibernate (auto-selected)" \
+      "jOOQ")
+  else
+    DB_ORM_CHOICE="None"
+    info "No predefined ORM options for this stack/database combination."
+    info "Configure your ORM manually after setup."
+  fi
+
+  # Normalize ORM key
+  case "$DB_ORM_CHOICE" in
+    "Prisma (recommended)"|"Prisma")                    DB_ORM="prisma" ;;
+    "Drizzle")                                          DB_ORM="drizzle" ;;
+    "TypeORM")                                          DB_ORM="typeorm" ;;
+    "Knex.js (query builder only)")                     DB_ORM="knex" ;;
+    "Mongoose")                                         DB_ORM="mongoose" ;;
+    "SQLAlchemy (recommended)")                         DB_ORM="sqlalchemy" ;;
+    "Django ORM (auto-selected)")                       DB_ORM="django-orm" ;;
+    "Tortoise ORM")                                     DB_ORM="tortoise" ;;
+    "Motor (async) / PyMongo")                          DB_ORM="motor" ;;
+    "MongoEngine")                                      DB_ORM="mongoengine" ;;
+    "GORM")                                             DB_ORM="gorm" ;;
+    "sqlx")                                             DB_ORM="sqlx" ;;
+    "Ent")                                              DB_ORM="ent" ;;
+    "mongo-go-driver")                                  DB_ORM="mongo-go-driver" ;;
+    "ActiveRecord (auto-selected)")                     DB_ORM="activerecord" ;;
+    "Diesel")                                           DB_ORM="diesel" ;;
+    "SQLx")                                             DB_ORM="sqlx" ;;
+    "SeaORM")                                           DB_ORM="seaorm" ;;
+    "Ecto (auto-selected)")                             DB_ORM="ecto" ;;
+    "Spring Data JPA / Hibernate (auto-selected)")      DB_ORM="spring-data-jpa" ;;
+    "jOOQ")                                             DB_ORM="jooq" ;;
+    *)                                                  DB_ORM="none" ;;
+  esac
+
+  # ── 3c. Database hosting mode ───────────────────
+  DB_HOSTING_CHOICE=$(choose "Database hosting mode:" \
+    "Cloud-hosted (recommended)" \
+    "Self-hosted" \
+    "Local only (dev/prototype)")
+
+  case "$DB_HOSTING_CHOICE" in
+    "Cloud-hosted (recommended)")
+      DB_HOSTING="cloud"
+
+      # Offer provider options based on database engine
+      case "$DB_ENGINE" in
+        "postgres")
+          DB_CLOUD_PROVIDER=$(choose "PostgreSQL cloud provider:" \
+            "Supabase" \
+            "Neon" \
+            "Railway" \
+            "Render" \
+            "AWS RDS" \
+            "GCP Cloud SQL")
+          ;;
+        "mysql")
+          DB_CLOUD_PROVIDER=$(choose "MySQL cloud provider:" \
+            "PlanetScale" \
+            "Railway" \
+            "AWS RDS" \
+            "GCP Cloud SQL")
+          ;;
+        "mongodb")
+          DB_CLOUD_PROVIDER=$(choose "MongoDB cloud provider:" \
+            "MongoDB Atlas" \
+            "Cosmos DB")
+          ;;
+        "redis")
+          DB_CLOUD_PROVIDER=$(choose "Redis cloud provider:" \
+            "Upstash" \
+            "Redis Cloud" \
+            "AWS ElastiCache")
+          ;;
+        "sqlite")
+          info "SQLite is a local file-based database — cloud hosting is not applicable."
+          info "Consider Turso (libSQL) for a cloud-hosted SQLite-compatible database."
+          DB_HOSTING="local"
+          ;;
+      esac
+
+      if [ "$DB_HOSTING" = "cloud" ]; then
+        info "Provider: $DB_CLOUD_PROVIDER"
+
+        # Prompt for connection string with format hint
+        case "$DB_ENGINE" in
+          "postgres") info "Format: postgres://user:password@host:5432/dbname" ;;
+          "mysql")    info "Format: mysql://user:password@host:3306/dbname" ;;
+          "mongodb")  info "Format: mongodb+srv://user:password@cluster.example.net/dbname" ;;
+          "redis")    info "Format: redis://user:password@host:6379" ;;
+        esac
+
+        DATABASE_URL=$(ask "Connection string / URL (leave empty to set later)" "")
+
+        # Validate connection string format if provided
+        if [ -n "$DATABASE_URL" ]; then
+          VALID_FORMAT=true
+          case "$DB_ENGINE" in
+            "postgres")
+              [[ "$DATABASE_URL" =~ ^postgres(ql)?:// ]] || VALID_FORMAT=false ;;
+            "mysql")
+              [[ "$DATABASE_URL" =~ ^mysql:// ]] || VALID_FORMAT=false ;;
+            "mongodb")
+              [[ "$DATABASE_URL" =~ ^mongodb(\+srv)?:// ]] || VALID_FORMAT=false ;;
+            "redis")
+              [[ "$DATABASE_URL" =~ ^redis(s)?:// ]] || VALID_FORMAT=false ;;
+          esac
+          if [ "$VALID_FORMAT" = false ]; then
+            warn "Connection string doesn't match expected format for $DB_ENGINE."
+            info "Saving as-is — verify it's correct before deploying."
+          fi
+        fi
+
+        # Ask for provider-specific API keys
+        case "$DB_CLOUD_PROVIDER" in
+          "Supabase")
+            DB_API_KEY=$(ask "Supabase API key (leave empty to set later)" "") ;;
+          "Neon")
+            DB_API_KEY=$(ask "Neon API key (leave empty to set later)" "") ;;
+          "PlanetScale")
+            DB_API_KEY=$(ask "PlanetScale service token (leave empty to set later)" "") ;;
+          "MongoDB Atlas")
+            DB_API_KEY=$(ask "Atlas API key (leave empty to set later)" "") ;;
+          "Upstash")
+            DB_API_KEY=$(ask "Upstash REST token (leave empty to set later)" "") ;;
+        esac
+      fi
+      ;;
+
+    "Self-hosted")
+      DB_HOSTING="self-hosted"
+      info "The database will be deployed alongside your app."
+      info "Provisioning details depend on your deploy provider (selected next)."
+      echo ""
+      info "  Fly.io:      Fly Postgres (managed) or attached volume"
+      info "  Docker:      docker-compose service"
+      info "  Serverless:  Vercel/Netlify/Cloudflare do NOT support self-hosted databases."
+      info "               If you pick a serverless provider, use a cloud-hosted database instead."
+      ;;
+
+    "Local only (dev/prototype)")
+      DB_HOSTING="local"
+
+      case "$DB_ENGINE" in
+        "sqlite")
+          info "SQLite database file will be created in the project directory."
+          DATABASE_URL="file:./dev.db"
+          ;;
+        *)
+          info "A local Docker container will be used for $DB_ENGINE_CHOICE."
+          info "Make sure Docker is installed: https://docs.docker.com/get-docker/"
+          ;;
+      esac
+      ;;
+  esac
+
+  # ── Summary ──────────────────────────────────────
+  echo ""
+  ok "Database configuration:"
+  echo -e "  Engine:  ${CYAN}${DB_ENGINE_CHOICE}${RESET}"
+  echo -e "  ORM:     ${CYAN}${DB_ORM_CHOICE}${RESET}"
+  echo -e "  Hosting: ${CYAN}${DB_HOSTING_CHOICE}${RESET}"
+  [ -n "${DB_CLOUD_PROVIDER:-}" ] && echo -e "  Provider: ${CYAN}${DB_CLOUD_PROVIDER}${RESET}"
+  [ -n "$DATABASE_URL" ] && echo -e "  URL:     ${DIM}(configured)${RESET}"
+  echo ""
+fi
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+header "4/8  GitHub"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 GITHUB_REPO=""
@@ -1013,7 +1289,7 @@ else
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "4/7  Deploys"
+header "5/8  Deploys"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DEPLOY_PROVIDER=$(choose "PR preview deploy provider:" \
@@ -1057,7 +1333,7 @@ case "$DEPLOY_PROVIDER" in
 esac
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "5/7  AI Agent (for Symphony)"
+header "6/8  AI Agent (for Symphony)"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 info "Symphony dispatches AI agents to implement issues autonomously."
@@ -1094,7 +1370,7 @@ case "$AGENT_CHOICE" in
 esac
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "6/7  Monitoring"
+header "7/8  Monitoring"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 MONITOR_CHOICE=$(choose "Error/performance monitoring:" \
@@ -1158,7 +1434,7 @@ if [ -n "$MONITOR_DSN" ]; then
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "7/7  Self-hosted runner"
+header "8/8  Self-hosted runner"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 SETUP_RUNNER=false
@@ -1278,9 +1554,65 @@ mkdir -p "$ROOT_DIR/.deploy-artifacts"
 mkdir -p "$ROOT_DIR/src"
 ok "Directories created"
 
-# ── 5. (removed — .env no longer generated) ─────────
-# All config is stored as GitHub repo secrets/variables (set in later steps).
-# Local scripts derive GITHUB_REPO from `gh repo view`.
+# ── 5. Persist database configuration ──────────────
+if [ -n "$DB_ENGINE" ]; then
+  echo ""
+
+  # Store DATABASE_URL as GitHub secret
+  if [ -n "$DATABASE_URL" ] && [ -n "$GITHUB_REPO" ] && gh repo view "$GITHUB_REPO" &>/dev/null; then
+    echo "$DATABASE_URL" | gh secret set DATABASE_URL --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo secret DATABASE_URL" || \
+      warn "Failed to set DATABASE_URL secret — set it manually in repo Settings > Secrets"
+  elif [ -n "$DATABASE_URL" ]; then
+    warn "Add DATABASE_URL to your GitHub repo secrets"
+  fi
+
+  # Store provider API key as GitHub secret
+  if [ -n "${DB_API_KEY:-}" ] && [ -n "$GITHUB_REPO" ] && gh repo view "$GITHUB_REPO" &>/dev/null; then
+    echo "$DB_API_KEY" | gh secret set DB_API_KEY --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo secret DB_API_KEY" || \
+      warn "Failed to set DB_API_KEY secret — set it manually in repo Settings > Secrets"
+  fi
+
+  # Set GitHub repo variables
+  if [ -n "$GITHUB_REPO" ] && gh repo view "$GITHUB_REPO" &>/dev/null; then
+    gh variable set DB_ENGINE --body "$DB_ENGINE" --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo variable DB_ENGINE=$DB_ENGINE" || \
+      warn "Failed to set DB_ENGINE variable"
+
+    gh variable set DB_ORM --body "$DB_ORM" --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo variable DB_ORM=$DB_ORM" || \
+      warn "Failed to set DB_ORM variable"
+
+    gh variable set DB_HOSTING --body "$DB_HOSTING" --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo variable DB_HOSTING=$DB_HOSTING" || \
+      warn "Failed to set DB_HOSTING variable"
+  else
+    warn "Set GitHub repo variables manually: DB_ENGINE=$DB_ENGINE, DB_ORM=$DB_ORM, DB_HOSTING=$DB_HOSTING"
+  fi
+
+  # Write .env with DATABASE_URL if provided
+  if [ -n "$DATABASE_URL" ]; then
+    echo "DATABASE_URL=$DATABASE_URL" >> "$ROOT_DIR/.env"
+    ok "Wrote DATABASE_URL to .env"
+    # Make sure .env is gitignored
+    if [ -f "$ROOT_DIR/.gitignore" ] && ! grep -q '^\.env$' "$ROOT_DIR/.gitignore"; then
+      echo ".env" >> "$ROOT_DIR/.gitignore"
+    fi
+  fi
+
+  # Write .env.example with placeholder
+  DB_URL_PLACEHOLDER=""
+  case "$DB_ENGINE" in
+    "postgres") DB_URL_PLACEHOLDER="postgres://user:password@localhost:5432/dbname" ;;
+    "mysql")    DB_URL_PLACEHOLDER="mysql://user:password@localhost:3306/dbname" ;;
+    "sqlite")   DB_URL_PLACEHOLDER="file:./dev.db" ;;
+    "mongodb")  DB_URL_PLACEHOLDER="mongodb+srv://user:password@cluster.example.net/dbname" ;;
+    "redis")    DB_URL_PLACEHOLDER="redis://localhost:6379" ;;
+  esac
+  echo "DATABASE_URL=$DB_URL_PLACEHOLDER" >> "$ROOT_DIR/.env.example"
+  ok "Wrote DATABASE_URL placeholder to .env.example"
+fi
 
 # ── 6. Configure lint script ────────────────────────
 if [ -n "$LINTER_CMD" ]; then
@@ -1979,6 +2311,7 @@ git add -A
 if git commit -m "Initialize project: ${PROJECT_NAME}
 
 Stack: ${STACK}
+Database: ${DB_ENGINE_CHOICE:-None}
 Agent: ${AGENT_CHOICE}
 Deploy: ${DEPLOY_PROVIDER}
 Monitoring: ${MONITOR_CHOICE}"; then
@@ -2015,6 +2348,9 @@ header "Done!"
 echo -e "${BOLD}$PROJECT_NAME${RESET} is configured."
 echo ""
 echo -e "  Stack:      ${CYAN}${STACK}${RESET}"
+echo -e "  Database:   ${CYAN}${DB_ENGINE_CHOICE:-None}${RESET}"
+[ -n "$DB_ORM" ] && [ "$DB_ORM" != "none" ] && echo -e "  ORM:        ${CYAN}${DB_ORM_CHOICE}${RESET}"
+[ -n "$DB_HOSTING" ] && echo -e "  DB Hosting: ${CYAN}${DB_HOSTING}${RESET}"
 echo -e "  Agent:      ${CYAN}${AGENT_CHOICE}${RESET}"
 echo -e "  Deploy:     ${CYAN}${DEPLOY_PROVIDER}${RESET}"
 echo -e "  Monitoring: ${CYAN}${MONITOR_CHOICE}${RESET}"
