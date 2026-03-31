@@ -651,6 +651,43 @@ case "$MONITOR_CHOICE" in
     ;;
 esac
 
+# Validate DSN format if provided
+if [ -n "$MONITOR_DSN" ]; then
+  DSN_VALID=true
+  case "$MONITOR_CHOICE" in
+    "Sentry")
+      # Sentry DSN: https://<key>@<host>/<project-id>
+      if ! echo "$MONITOR_DSN" | grep -qE '^https://[a-f0-9]+@[^/]+/[0-9]+$'; then
+        warn "Sentry DSN doesn't match expected format: https://<key>@<host>/<project-id>"
+        if ! confirm "Continue with this value anyway?"; then
+          MONITOR_DSN=""
+          DSN_VALID=false
+        fi
+      fi
+      ;;
+    "Datadog")
+      # Datadog API key: 32-character hex string
+      if ! echo "$MONITOR_DSN" | grep -qE '^[a-f0-9]{32}$'; then
+        warn "Datadog API key doesn't look like a valid 32-character hex key"
+        if ! confirm "Continue with this value anyway?"; then
+          MONITOR_DSN=""
+          DSN_VALID=false
+        fi
+      fi
+      ;;
+    "Grafana")
+      # Grafana endpoint: should be a valid URL
+      if ! echo "$MONITOR_DSN" | grep -qE '^https?://'; then
+        warn "Grafana endpoint doesn't look like a valid URL (expected https://...)"
+        if ! confirm "Continue with this value anyway?"; then
+          MONITOR_DSN=""
+          DSN_VALID=false
+        fi
+      fi
+      ;;
+  esac
+fi
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 header "7/7  Self-hosted runner"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -965,6 +1002,48 @@ if [ "$AGENT_CHOICE" != "None / I'll configure later" ]; then
         ;;
     esac
   fi
+fi
+
+# ── 10b. Configure monitoring ──────────────────────
+if [ "$MONITOR_CHOICE" != "None / I'll configure later" ]; then
+  echo ""
+
+  # Store MONITOR_CHOICE as a GitHub repo variable
+  if [ -n "$GITHUB_REPO" ]; then
+    MONITOR_CHOICE_VALUE=""
+    case "$MONITOR_CHOICE" in
+      "Sentry")  MONITOR_CHOICE_VALUE="sentry" ;;
+      "Datadog") MONITOR_CHOICE_VALUE="datadog" ;;
+      "Grafana") MONITOR_CHOICE_VALUE="grafana" ;;
+    esac
+
+    gh variable set MONITOR_CHOICE --body "$MONITOR_CHOICE_VALUE" --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo variable MONITOR_CHOICE=$MONITOR_CHOICE_VALUE" || \
+      warn "Failed to set MONITOR_CHOICE variable — set it manually in repo Settings > Variables"
+  fi
+
+  # Store MONITOR_DSN as a GitHub secret and write to .env
+  if [ -n "$MONITOR_DSN" ] && [ -n "$GITHUB_REPO" ]; then
+    echo "$MONITOR_DSN" | gh secret set MONITOR_DSN --repo "$GITHUB_REPO" 2>/dev/null && \
+      ok "Set repo secret MONITOR_DSN" || \
+      warn "Failed to set MONITOR_DSN secret — set it manually in repo Settings > Secrets"
+  elif [ -z "$MONITOR_DSN" ]; then
+    warn "No DSN provided — add MONITOR_DSN to your GitHub repo secrets later"
+  fi
+
+  # Write MONITOR_DSN to .env (actual value or placeholder)
+  ENV_FILE="$ROOT_DIR/.env"
+  if [ -n "$MONITOR_DSN" ]; then
+    echo "MONITOR_DSN=$MONITOR_DSN" >> "$ENV_FILE"
+    ok "Wrote MONITOR_DSN to .env"
+  else
+    echo "MONITOR_DSN=" >> "$ENV_FILE"
+    ok "Wrote MONITOR_DSN placeholder to .env (fill in later)"
+  fi
+
+  echo ""
+  info "Monitoring configured: ${MONITOR_CHOICE}"
+  [ -n "$MONITOR_DSN" ] && info "DSN stored as GitHub secret and in .env"
 fi
 
 # ── 11. Create GitHub labels ────────────────────────
