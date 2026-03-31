@@ -1,7 +1,8 @@
 .PHONY: help init teardown setup check lint test test-e2e structure worktree worktree-cleanup \
        gc gc-branches gc-worktrees gc-deploys gc-artifacts \
        deploy-preview deploy-cleanup deploy-prod test-template \
-       setup-runner runner-start runner-stop runner-status runner-remove
+       setup-runner runner-start runner-stop runner-status runner-remove \
+       monitor-test
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -122,6 +123,13 @@ runner-status: ## Show self-hosted runner status
 
 runner-remove: ## Unregister and remove the self-hosted runner
 	@./scripts/runner/manage.sh remove
+
+# ──────────────────────────────────────────────
+# Monitoring
+# ──────────────────────────────────────────────
+
+monitor-test: ## Send a smoke-test event to the configured monitoring provider
+	@./scripts/monitoring/smoke-test.sh
 
 # ──────────────────────────────────────────────
 # Template tests (validates the template itself)

@@ -238,6 +238,445 @@ JAVA_CI_STEPS='      - uses: actions/setup-java@v4
           java-version: "21"
       - run: if [ -f gradlew ]; then ./gradlew dependencies; fi'
 
+# ── generate_monitoring_sdk: emits SDK init files, adds deps, updates README
+#    Args: $1=provider (sentry|datadog|grafana)  $2=family (node|python|go|…)
+#         $3=framework name  $4=target dir (ROOT_DIR or ROOT_DIR/backend)
+generate_monitoring_sdk() {
+  local provider="$1" family="$2" framework="$3" target="$4"
+  local monitor_dir="$target/monitoring"
+
+  mkdir -p "$monitor_dir"
+
+  case "$provider" in
+    # ─────────────────────── SENTRY ───────────────────────
+    sentry)
+      case "$family" in
+        node)
+          # Determine the right Sentry package
+          local sentry_pkg="@sentry/node"
+          [[ "$framework" == "Next.js"* ]] && sentry_pkg="@sentry/nextjs"
+
+          cat > "$target/sentry.config.ts" <<'SENTRY_NODE_EOF'
+import * as Sentry from "__SENTRY_PKG__";
+
+Sentry.init({
+  dsn: process.env.MONITOR_DSN,
+  tracesSampleRate: 1.0,
+  environment: process.env.NODE_ENV || "development",
+});
+
+export default Sentry;
+SENTRY_NODE_EOF
+          sed -i.bak "s|__SENTRY_PKG__|${sentry_pkg}|g" "$target/sentry.config.ts"
+          rm -f "$target/sentry.config.ts.bak"
+
+          # Add dependency to package.json if it exists
+          if [ -f "$target/package.json" ]; then
+            cd "$target" && npm install --save "$sentry_pkg" 2>/dev/null && cd "$ROOT_DIR" || true
+          fi
+          ok "Generated sentry.config.ts (${sentry_pkg})"
+          ;;
+
+        python)
+          # Determine framework integration
+          local py_integration=""
+          case "$framework" in
+            FastAPI*) py_integration='from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
+
+INTEGRATIONS = [FastApiIntegration(), StarletteIntegration()]' ;;
+            Django*)  py_integration='from sentry_sdk.integrations.django import DjangoIntegration
+
+INTEGRATIONS = [DjangoIntegration()]' ;;
+            Flask*)   py_integration='from sentry_sdk.integrations.flask import FlaskIntegration
+
+INTEGRATIONS = [FlaskIntegration()]' ;;
+            *)        py_integration='INTEGRATIONS = []' ;;
+          esac
+
+          cat > "$target/sentry_config.py" <<SENTRY_PY_EOF
+import os
+import sentry_sdk
+
+${py_integration}
+
+sentry_sdk.init(
+    dsn=os.environ["MONITOR_DSN"],
+    traces_sample_rate=1.0,
+    integrations=INTEGRATIONS,
+    environment=os.environ.get("ENVIRONMENT", "development"),
+)
+SENTRY_PY_EOF
+
+          # Add dependency
+          if [ -f "$target/requirements.txt" ]; then
+            grep -q 'sentry-sdk' "$target/requirements.txt" || echo 'sentry-sdk' >> "$target/requirements.txt"
+          fi
+          ok "Generated sentry_config.py"
+          ;;
+
+        go)
+          cat > "$target/sentry.go" <<'SENTRY_GO_EOF'
+package main
+
+import (
+	"log"
+	"os"
+	"time"
+
+	"github.com/getsentry/sentry-go"
+)
+
+func InitSentry() {
+	err := sentry.Init(sentry.ClientOptions{
+		Dsn:              os.Getenv("MONITOR_DSN"),
+		TracesSampleRate: 1.0,
+		Environment:      os.Getenv("ENVIRONMENT"),
+	})
+	if err != nil {
+		log.Fatalf("sentry.Init: %s", err)
+	}
+	defer sentry.Flush(2 * time.Second)
+}
+SENTRY_GO_EOF
+
+          if [ -f "$target/go.mod" ]; then
+            cd "$target" && go get github.com/getsentry/sentry-go 2>/dev/null && cd "$ROOT_DIR" || true
+          fi
+          ok "Generated sentry.go"
+          ;;
+
+        *)
+          cat > "$monitor_dir/SETUP.md" <<SENTRY_OTHER_EOF
+# Sentry SDK Setup
+
+Your stack ($framework) needs manual Sentry SDK setup.
+
+1. Install the Sentry SDK for your language
+2. Initialize it with:
+   \`\`\`
+   dsn = os.environ["MONITOR_DSN"]  # or your language's equivalent
+   \`\`\`
+3. See https://docs.sentry.io/platforms/ for framework-specific guides
+SENTRY_OTHER_EOF
+          ok "Generated monitoring/SETUP.md (manual Sentry setup instructions)"
+          ;;
+      esac
+      ;;
+
+    # ─────────────────────── DATADOG ──────────────────────
+    datadog)
+      case "$family" in
+        node)
+          cat > "$target/dd-trace.config.ts" <<'DD_NODE_EOF'
+import tracer from "dd-trace";
+
+tracer.init({
+  env: process.env.NODE_ENV || "development",
+  logInjection: true,
+});
+
+export default tracer;
+DD_NODE_EOF
+
+          if [ -f "$target/package.json" ]; then
+            cd "$target" && npm install --save dd-trace 2>/dev/null && cd "$ROOT_DIR" || true
+          fi
+          ok "Generated dd-trace.config.ts"
+          ;;
+
+        python)
+          cat > "$target/ddtrace_config.py" <<'DD_PY_EOF'
+import os
+from ddtrace import config, tracer
+
+config.env = os.environ.get("ENVIRONMENT", "development")
+
+# Auto-instrumentation patches supported libraries on import.
+# Run your app with: ddtrace-run python app.py
+# Or import this module early in your entry point.
+
+tracer.configure(
+    hostname=os.environ.get("DD_AGENT_HOST", "localhost"),
+    port=int(os.environ.get("DD_TRACE_AGENT_PORT", "8126")),
+)
+DD_PY_EOF
+
+          if [ -f "$target/requirements.txt" ]; then
+            grep -q 'ddtrace' "$target/requirements.txt" || echo 'ddtrace' >> "$target/requirements.txt"
+          fi
+          ok "Generated ddtrace_config.py"
+          ;;
+
+        go)
+          cat > "$target/ddtrace.go" <<'DD_GO_EOF'
+package main
+
+import (
+	"os"
+
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+)
+
+func InitDatadog() {
+	tracer.Start(
+		tracer.WithEnv(os.Getenv("ENVIRONMENT")),
+		tracer.WithAnalytics(true),
+	)
+}
+
+func StopDatadog() {
+	tracer.Stop()
+}
+DD_GO_EOF
+
+          if [ -f "$target/go.mod" ]; then
+            cd "$target" && go get gopkg.in/DataDog/dd-trace-go.v1 2>/dev/null && cd "$ROOT_DIR" || true
+          fi
+          ok "Generated ddtrace.go"
+          ;;
+
+        *)
+          cat > "$monitor_dir/SETUP.md" <<DD_OTHER_EOF
+# Datadog SDK Setup
+
+Your stack ($framework) needs manual Datadog setup.
+
+1. Install the Datadog tracing library for your language
+2. Set DD_API_KEY to your MONITOR_DSN value
+3. See https://docs.datadoghq.com/tracing/setup_overview/ for guides
+DD_OTHER_EOF
+          ok "Generated monitoring/SETUP.md (manual Datadog setup instructions)"
+          ;;
+      esac
+      ;;
+
+    # ─────────────────────── GRAFANA (OpenTelemetry) ──────
+    grafana)
+      case "$family" in
+        node)
+          cat > "$target/otel.config.ts" <<'OTEL_NODE_EOF'
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+
+const traceExporter = new OTLPTraceExporter({
+  url: process.env.MONITOR_DSN
+    ? `${process.env.MONITOR_DSN}/v1/traces`
+    : "http://localhost:4318/v1/traces",
+});
+
+const metricExporter = new OTLPMetricExporter({
+  url: process.env.MONITOR_DSN
+    ? `${process.env.MONITOR_DSN}/v1/metrics`
+    : "http://localhost:4318/v1/metrics",
+});
+
+const sdk = new NodeSDK({
+  traceExporter,
+  metricReader: new PeriodicExportingMetricReader({ exporter: metricExporter }),
+  instrumentations: [getNodeAutoInstrumentations()],
+});
+
+sdk.start();
+
+process.on("SIGTERM", () => sdk.shutdown());
+
+export default sdk;
+OTEL_NODE_EOF
+
+          if [ -f "$target/package.json" ]; then
+            cd "$target" && npm install --save \
+              @opentelemetry/sdk-node \
+              @opentelemetry/exporter-trace-otlp-http \
+              @opentelemetry/exporter-metrics-otlp-http \
+              @opentelemetry/sdk-metrics \
+              @opentelemetry/auto-instrumentations-node \
+              2>/dev/null && cd "$ROOT_DIR" || true
+          fi
+          ok "Generated otel.config.ts (OpenTelemetry → Grafana)"
+          ;;
+
+        python)
+          cat > "$target/otel_config.py" <<'OTEL_PY_EOF'
+import os
+from opentelemetry import trace, metrics
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+
+endpoint = os.environ.get("MONITOR_DSN", "http://localhost:4318")
+
+# Traces
+trace_provider = TracerProvider()
+trace_provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces"))
+)
+trace.set_tracer_provider(trace_provider)
+
+# Metrics
+metric_reader = PeriodicExportingMetricReader(
+    OTLPMetricExporter(endpoint=f"{endpoint}/v1/metrics")
+)
+metrics.set_meter_provider(MeterProvider(metric_readers=[metric_reader]))
+OTEL_PY_EOF
+
+          if [ -f "$target/requirements.txt" ]; then
+            for pkg in opentelemetry-sdk opentelemetry-exporter-otlp-proto-http opentelemetry-api; do
+              grep -q "$pkg" "$target/requirements.txt" || echo "$pkg" >> "$target/requirements.txt"
+            done
+          fi
+          ok "Generated otel_config.py (OpenTelemetry → Grafana)"
+          ;;
+
+        go)
+          cat > "$target/otel.go" <<'OTEL_GO_EOF'
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+func InitOtel(ctx context.Context, serviceName string) func() {
+	endpoint := os.Getenv("MONITOR_DSN")
+	if endpoint == "" {
+		endpoint = "http://localhost:4318"
+	}
+
+	exporter, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpoint(endpoint),
+	)
+	if err != nil {
+		log.Fatalf("failed to create OTLP exporter: %v", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+
+	return func() { _ = tp.Shutdown(ctx) }
+}
+OTEL_GO_EOF
+
+          if [ -f "$target/go.mod" ]; then
+            cd "$target" && go get \
+              go.opentelemetry.io/otel \
+              go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp \
+              go.opentelemetry.io/otel/sdk \
+              2>/dev/null && cd "$ROOT_DIR" || true
+          fi
+          ok "Generated otel.go (OpenTelemetry → Grafana)"
+          ;;
+
+        *)
+          cat > "$monitor_dir/SETUP.md" <<OTEL_OTHER_EOF
+# OpenTelemetry SDK Setup (Grafana)
+
+Your stack ($framework) needs manual OpenTelemetry setup.
+
+1. Install the OpenTelemetry SDK for your language
+2. Configure the OTLP HTTP exporter to point at:
+   \`\`\`
+   endpoint = os.environ["MONITOR_DSN"]  # your Grafana OTLP endpoint
+   \`\`\`
+3. See https://opentelemetry.io/docs/languages/ for language-specific guides
+OTEL_OTHER_EOF
+          ok "Generated monitoring/SETUP.md (manual OpenTelemetry setup instructions)"
+          ;;
+      esac
+      ;;
+  esac
+
+  # ── Update monitoring/README.md with provider-specific setup ──
+  local provider_label=""
+  local setup_notes=""
+  case "$provider" in
+    sentry)
+      provider_label="Sentry"
+      setup_notes="- DSN is read from \`MONITOR_DSN\` environment variable
+- Import the generated config file at your application's entry point
+- Errors and performance data will be sent to your Sentry project automatically"
+      ;;
+    datadog)
+      provider_label="Datadog"
+      setup_notes="- API key is read from \`MONITOR_DSN\` environment variable
+- For Node.js: import \`dd-trace.config.ts\` before any other imports
+- For Python: run your app with \`ddtrace-run\` or import \`ddtrace_config\` early
+- For Go: call \`InitDatadog()\` at startup and \`defer StopDatadog()\`"
+      ;;
+    grafana)
+      provider_label="Grafana Cloud (OpenTelemetry)"
+      setup_notes="- OTLP endpoint is read from \`MONITOR_DSN\` environment variable
+- Import the generated OTel config at your application's entry point
+- Traces and metrics are exported via OTLP HTTP to your Grafana endpoint"
+      ;;
+  esac
+
+  cat > "$ROOT_DIR/monitoring/README.md" <<MONITOR_README_EOF
+# Monitoring
+
+Error tracking, alerting, and dashboards for observability.
+
+## Active Provider: ${provider_label}
+
+**Stack:** ${framework}
+
+### Setup
+
+${setup_notes}
+
+### Smoke Test
+
+Run a test event to verify your monitoring pipeline:
+
+\`\`\`bash
+make monitor-test
+\`\`\`
+
+### Environment Variables
+
+| Variable       | Description                          | Required |
+|---------------|--------------------------------------|----------|
+| \`MONITOR_DSN\` | ${provider_label} DSN / API key / endpoint | Yes      |
+
+## Structure
+
+\`\`\`
+monitoring/
+├── alerts/       # Alert rule definitions
+├── dashboards/   # Dashboard configurations
+└── README.md
+\`\`\`
+
+## Alerts
+
+Define alert rules as code in \`monitoring/alerts/\`.
+
+## Dashboards
+
+Store dashboard definitions as code in \`monitoring/dashboards/\`.
+MONITOR_README_EOF
+  ok "Updated monitoring/README.md for ${provider_label}"
+}
+
 # ── resolve_stack: sets _LINTER, _FMT, _TEST, _E2E, _SETUP, _CI, _PKG
 #    for a given framework name. Used for both single-stack and fullstack.
 resolve_stack() {
@@ -245,9 +684,13 @@ resolve_stack() {
 
   _LINTER="" _FMT="" _TEST="" _E2E="" _SETUP="" _CI="" _PKG=""
 
+  # Also classify the stack "family" for monitoring SDK generation
+  _FAMILY=""
+
   case "$fw" in
     # ── JS/TS frameworks ─────────────────────────────
     "Next.js (React)")
+      _FAMILY="node"
       _LINTER='npm run lint && npx prettier --check .'
       _FMT='npx prettier --write .'
       _TEST='npx vitest run --passWithNoTests'
@@ -257,6 +700,7 @@ resolve_stack() {
       _PKG='npx create-next-app@latest . --ts --eslint --tailwind --app --src-dir --import-alias "@/*" --use-npm && npm install -D vitest @vitejs/plugin-react playwright'
       ;;
     "SvelteKit")
+      _FAMILY="node"
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -266,6 +710,7 @@ resolve_stack() {
       _PKG='npx sv create . --template minimal --types ts --no-add-ons && npm install -D vitest playwright eslint prettier'
       ;;
     "Nuxt (Vue)")
+      _FAMILY="node"
       _LINTER='npx nuxi typecheck && npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -275,6 +720,7 @@ resolve_stack() {
       _PKG='npx nuxi@latest init . --force && npm install -D vitest @nuxt/test-utils playwright eslint prettier'
       ;;
     "Astro")
+      _FAMILY="node"
       _LINTER='npx astro check && npx prettier --check .'
       _FMT='npx prettier --write .'
       _TEST='npx vitest run --passWithNoTests'
@@ -284,6 +730,7 @@ resolve_stack() {
       _PKG='npm create astro@latest -- . --template minimal --typescript strict --install --no-git && npm install -D vitest playwright prettier'
       ;;
     "Remix")
+      _FAMILY="node"
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -293,6 +740,7 @@ resolve_stack() {
       _PKG='npx create-remix@latest . --yes && npm install -D vitest playwright prettier'
       ;;
     "Hono (API)")
+      _FAMILY="node"
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -302,6 +750,7 @@ resolve_stack() {
       _PKG='npm create hono@latest . -- --template nodejs && npm install -D typescript eslint prettier vitest @types/node'
       ;;
     "Express (TypeScript)")
+      _FAMILY="node"
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -311,6 +760,7 @@ resolve_stack() {
       _PKG='npm init -y && npm install express && npm install -D typescript @types/express @types/node eslint prettier vitest tsx && npx tsc --init'
       ;;
     "Node.js (TypeScript, no framework)")
+      _FAMILY="node"
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -320,6 +770,7 @@ resolve_stack() {
       _PKG='npm init -y && npm install -D typescript eslint prettier vitest @types/node && npx tsc --init'
       ;;
     "Node.js (JavaScript, no framework)")
+      _FAMILY="node"
       _LINTER='npx eslint . --max-warnings 0 && npx prettier --check .'
       _FMT='npx prettier --write . && npx eslint . --fix'
       _TEST='npx vitest run --passWithNoTests'
@@ -331,6 +782,7 @@ resolve_stack() {
 
     # ── Python frameworks ────────────────────────────
     "FastAPI")
+      _FAMILY="python"
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
       _TEST='pytest tests/ --ignore=tests/e2e || [ $? -eq 5 ]'
@@ -340,6 +792,7 @@ resolve_stack() {
       _PKG='python -m venv .venv && source .venv/bin/activate && pip install fastapi uvicorn ruff pytest httpx && pip freeze > requirements.txt'
       ;;
     "Django")
+      _FAMILY="python"
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
       _TEST='python manage.py test'
@@ -349,6 +802,7 @@ resolve_stack() {
       _PKG='python -m venv .venv && source .venv/bin/activate && pip install django ruff pytest && django-admin startproject config . && pip freeze > requirements.txt'
       ;;
     "Flask")
+      _FAMILY="python"
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
       _TEST='pytest tests/ --ignore=tests/e2e || [ $? -eq 5 ]'
@@ -358,6 +812,7 @@ resolve_stack() {
       _PKG='python -m venv .venv && source .venv/bin/activate && pip install flask ruff pytest && pip freeze > requirements.txt'
       ;;
     "Python (no framework)")
+      _FAMILY="python"
       _LINTER='ruff check . && ruff format --check .'
       _FMT='ruff format . && ruff check . --fix'
       _TEST='pytest tests/ --ignore=tests/e2e || [ $? -eq 5 ]'
@@ -369,6 +824,7 @@ resolve_stack() {
 
     # ── Go ───────────────────────────────────────────
     "Go")
+      _FAMILY="go"
       _LINTER='golangci-lint run ./...'
       _FMT='gofmt -w .'
       _TEST='go test ./...'
@@ -380,6 +836,7 @@ resolve_stack() {
 
     # ── Rust ─────────────────────────────────────────
     "Axum (API)")
+      _FAMILY="rust"
       _LINTER='cargo clippy -- -D warnings && cargo fmt -- --check'
       _FMT='cargo fmt'
       _TEST='cargo test'
@@ -389,6 +846,7 @@ resolve_stack() {
       _PKG='cargo init --name '"$PROJECT_NAME"' && cargo add axum tokio --features tokio/full && cargo add -D tower-http'
       ;;
     "Rust (no framework)")
+      _FAMILY="rust"
       _LINTER='cargo clippy -- -D warnings && cargo fmt -- --check'
       _FMT='cargo fmt'
       _TEST='cargo test'
@@ -400,6 +858,7 @@ resolve_stack() {
 
     # ── Elixir / Phoenix ─────────────────────────────
     "Phoenix")
+      _FAMILY="elixir"
       _LINTER='mix format --check-formatted && mix credo --strict'
       _FMT='mix format'
       _TEST='mix test'
@@ -409,6 +868,7 @@ resolve_stack() {
       _PKG='mix archive.install hex phx_new --force && mix phx.new . --app '"$PROJECT_NAME"' --no-install && mix deps.get'
       ;;
     "Elixir (no framework)")
+      _FAMILY="elixir"
       _LINTER='mix format --check-formatted && mix credo --strict'
       _FMT='mix format'
       _TEST='mix test'
@@ -420,6 +880,7 @@ resolve_stack() {
 
     # ── Ruby / Rails ─────────────────────────────────
     "Rails")
+      _FAMILY="ruby"
       _LINTER='bundle exec rubocop'
       _FMT='bundle exec rubocop -A'
       _TEST='bundle exec rails test'
@@ -429,6 +890,7 @@ resolve_stack() {
       _PKG='gem install rails && rails new . --name='"$PROJECT_NAME"' --skip-git --force && bundle add rubocop --group=development'
       ;;
     "Ruby (no framework)")
+      _FAMILY="ruby"
       _LINTER='bundle exec rubocop'
       _FMT='bundle exec rubocop -A'
       _TEST='bundle exec rake test'
@@ -440,6 +902,7 @@ resolve_stack() {
 
     # ── Java / Kotlin (Spring Boot) ──────────────────
     "Spring Boot (Kotlin)")
+      _FAMILY="java"
       _LINTER='./gradlew ktlintCheck'
       _FMT='./gradlew ktlintFormat'
       _TEST='./gradlew test'
@@ -449,6 +912,7 @@ resolve_stack() {
       _PKG='curl -s "https://start.spring.io/starter.tgz?type=gradle-project-kotlin&language=kotlin&bootVersion=3.4.1&groupId=com.example&artifactId='"$PROJECT_NAME"'&dependencies=web,actuator" | tar -xzf - && gradle wrapper'
       ;;
     "Spring Boot (Java)")
+      _FAMILY="java"
       _LINTER='./gradlew checkstyleMain checkstyleTest'
       _FMT='./gradlew spotlessApply'
       _TEST='./gradlew test'
@@ -461,16 +925,20 @@ resolve_stack() {
 }
 
 # ── Apply stack configuration ─────────────────────────
+STACK_FAMILY=""
 if [ "$IS_FULLSTACK" = true ]; then
   # Resolve backend
   resolve_stack "$BACKEND_STACK"
   BE_LINTER="$_LINTER"; BE_FMT="$_FMT"; BE_TEST="$_TEST"; BE_E2E="$_E2E"
-  BE_SETUP="$_SETUP"; BE_CI="$_CI"; BE_PKG="$_PKG"
+  BE_SETUP="$_SETUP"; BE_CI="$_CI"; BE_PKG="$_PKG"; BE_FAMILY="$_FAMILY"
 
   # Resolve frontend
   resolve_stack "$FRONTEND_STACK"
   FE_LINTER="$_LINTER"; FE_FMT="$_FMT"; FE_TEST="$_TEST"; FE_E2E="$_E2E"
-  FE_SETUP="$_SETUP"; FE_CI="$_CI"; FE_PKG="$_PKG"
+  FE_SETUP="$_SETUP"; FE_CI="$_CI"; FE_PKG="$_PKG"; FE_FAMILY="$_FAMILY"
+
+  # Use backend family for monitoring (primary app logic lives there)
+  STACK_FAMILY="$BE_FAMILY"
 
   # Combine: run each tool in its subdirectory
   LINTER_CMD="(cd backend && ${BE_LINTER}) && (cd frontend && ${FE_LINTER})"
@@ -490,6 +958,7 @@ elif [ "$STACK" != "None" ] && [ -n "$STACK" ]; then
   resolve_stack "$STACK"
   LINTER_CMD="$_LINTER"; TEST_CMD="$_TEST"; E2E_CMD="$_E2E"
   SETUP_CMD="$_SETUP"; CI_SETUP_STEPS="$_CI"; PKG_INIT_CMD="$_PKG"
+  STACK_FAMILY="$_FAMILY"
 else
   info "Skipping stack setup. Configure scripts/checks/ manually later."
 fi
@@ -1044,6 +1513,151 @@ if [ "$MONITOR_CHOICE" != "None / I'll configure later" ]; then
   echo ""
   info "Monitoring configured: ${MONITOR_CHOICE}"
   [ -n "$MONITOR_DSN" ] && info "DSN stored as GitHub secret and in .env"
+
+  # ── 10c. Generate monitoring SDK init code ──────────
+  MONITOR_PROVIDER_KEY=""
+  case "$MONITOR_CHOICE" in
+    "Sentry")  MONITOR_PROVIDER_KEY="sentry" ;;
+    "Datadog") MONITOR_PROVIDER_KEY="datadog" ;;
+    "Grafana") MONITOR_PROVIDER_KEY="grafana" ;;
+  esac
+
+  if [ -n "$MONITOR_PROVIDER_KEY" ] && [ -n "$STACK_FAMILY" ]; then
+    echo ""
+    info "Generating ${MONITOR_CHOICE} SDK initialization code..."
+
+    if [ "$IS_FULLSTACK" = true ]; then
+      # For fullstack: generate monitoring in the backend directory
+      generate_monitoring_sdk "$MONITOR_PROVIDER_KEY" "$BE_FAMILY" "$BACKEND_STACK" "$ROOT_DIR/backend"
+      # Also generate for frontend if it's a different family
+      if [ "$FE_FAMILY" != "$BE_FAMILY" ]; then
+        generate_monitoring_sdk "$MONITOR_PROVIDER_KEY" "$FE_FAMILY" "$FRONTEND_STACK" "$ROOT_DIR/frontend"
+      fi
+    else
+      generate_monitoring_sdk "$MONITOR_PROVIDER_KEY" "$STACK_FAMILY" "$STACK" "$ROOT_DIR"
+    fi
+  elif [ -n "$MONITOR_PROVIDER_KEY" ]; then
+    # Unknown stack family — generate manual instructions
+    generate_monitoring_sdk "$MONITOR_PROVIDER_KEY" "unknown" "${STACK:-None}" "$ROOT_DIR"
+  fi
+
+  # ── 10d. Generate smoke-test script ──────────────────
+  info "Generating monitoring smoke-test script..."
+  mkdir -p "$ROOT_DIR/scripts/monitoring"
+  cat > "$ROOT_DIR/scripts/monitoring/smoke-test.sh" <<'SMOKE_HEADER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+echo "Running monitoring smoke test..."
+
+if [ -z "${MONITOR_DSN:-}" ]; then
+  if [ -f "$ROOT_DIR/.env" ]; then
+    # shellcheck disable=SC1091
+    set -a; source "$ROOT_DIR/.env"; set +a
+  fi
+fi
+
+if [ -z "${MONITOR_DSN:-}" ]; then
+  echo "ERROR: MONITOR_DSN is not set. Set it in .env or as an environment variable."
+  exit 1
+fi
+
+echo "  MONITOR_DSN is configured"
+
+SMOKE_HEADER
+
+  # Append provider-specific smoke test
+  case "$MONITOR_PROVIDER_KEY" in
+    sentry)
+      cat >> "$ROOT_DIR/scripts/monitoring/smoke-test.sh" <<'SMOKE_SENTRY'
+echo "  Sending test event to Sentry..."
+
+# Extract the Sentry API endpoint from the DSN
+# DSN format: https://<key>@<host>/<project-id>
+SENTRY_KEY=$(echo "$MONITOR_DSN" | sed -n 's|https://\([^@]*\)@.*|\1|p')
+SENTRY_HOST=$(echo "$MONITOR_DSN" | sed -n 's|https://[^@]*@\([^/]*\)/.*|\1|p')
+SENTRY_PROJECT=$(echo "$MONITOR_DSN" | sed -n 's|.*/\([0-9]*\)$|\1|p')
+
+if [ -z "$SENTRY_KEY" ] || [ -z "$SENTRY_HOST" ] || [ -z "$SENTRY_PROJECT" ]; then
+  echo "ERROR: Could not parse Sentry DSN. Check the format: https://<key>@<host>/<project-id>"
+  exit 1
+fi
+
+RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+  "https://${SENTRY_HOST}/api/${SENTRY_PROJECT}/store/" \
+  -H "Content-Type: application/json" \
+  -H "X-Sentry-Auth: Sentry sentry_version=7,sentry_key=${SENTRY_KEY}" \
+  -d '{
+    "event_id": "'$(uuidgen 2>/dev/null | tr -d '-' | tr '[:upper:]' '[:lower:]' || python3 -c "import uuid; print(uuid.uuid4().hex)")'",
+    "message": "Monitoring smoke test from make monitor-test",
+    "level": "info",
+    "platform": "other"
+  }')
+
+if [ "$RESPONSE" -eq 200 ]; then
+  echo "  ✓ Test event sent successfully. Check your Sentry dashboard."
+else
+  echo "  ✗ Sentry returned HTTP $RESPONSE. Verify your DSN."
+  exit 1
+fi
+SMOKE_SENTRY
+      ;;
+    datadog)
+      cat >> "$ROOT_DIR/scripts/monitoring/smoke-test.sh" <<'SMOKE_DD'
+echo "  Sending test event to Datadog..."
+
+RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+  "https://api.datadoghq.com/api/v1/events" \
+  -H "Content-Type: application/json" \
+  -H "DD-API-KEY: ${MONITOR_DSN}" \
+  -d '{
+    "title": "Monitoring smoke test",
+    "text": "Test event from make monitor-test",
+    "priority": "low",
+    "alert_type": "info"
+  }')
+
+if [ "$RESPONSE" -eq 202 ]; then
+  echo "  ✓ Test event sent successfully. Check your Datadog Events dashboard."
+else
+  echo "  ✗ Datadog returned HTTP $RESPONSE. Verify your API key."
+  exit 1
+fi
+SMOKE_DD
+      ;;
+    grafana)
+      cat >> "$ROOT_DIR/scripts/monitoring/smoke-test.sh" <<'SMOKE_GRAFANA'
+echo "  Checking OTLP endpoint connectivity..."
+
+OTEL_ENDPOINT="${MONITOR_DSN%/}"
+RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+  "${OTEL_ENDPOINT}/v1/traces" \
+  -H "Content-Type: application/json" \
+  -d '{"resourceSpans":[]}' \
+  2>/dev/null || echo "000")
+
+if [ "$RESPONSE" -eq 200 ] || [ "$RESPONSE" -eq 204 ]; then
+  echo "  ✓ OTLP endpoint is reachable. Monitoring pipeline is ready."
+elif [ "$RESPONSE" -eq 000 ]; then
+  echo "  ✗ Could not reach OTLP endpoint at ${OTEL_ENDPOINT}. Check your MONITOR_DSN."
+  exit 1
+else
+  echo "  ⚠ OTLP endpoint returned HTTP $RESPONSE. It may still work — check your Grafana dashboard."
+fi
+SMOKE_GRAFANA
+      ;;
+  esac
+
+  cat >> "$ROOT_DIR/scripts/monitoring/smoke-test.sh" <<'SMOKE_FOOTER'
+
+echo ""
+echo "Smoke test complete."
+SMOKE_FOOTER
+
+  chmod +x "$ROOT_DIR/scripts/monitoring/smoke-test.sh"
+  ok "Generated scripts/monitoring/smoke-test.sh"
 fi
 
 # ── 11. Create GitHub labels ────────────────────────
@@ -1417,6 +2031,10 @@ echo "  3. Read: docs/SETUP.md           (finish GitHub secrets/variables)"
 if [ -n "$DEPLOY_PROVIDER_KEY" ]; then
   echo "  4. Read: docs/DEPLOY.md           (configure $DEPLOY_PROVIDER deploys)"
   echo "  5. Edit: scripts/deploy/pr-preview.sh  (uncomment $DEPLOY_PROVIDER_KEY block)"
+fi
+
+if [ "${MONITOR_CHOICE:-}" != "None / I'll configure later" ] && [ -n "${MONITOR_CHOICE:-}" ]; then
+  echo "  6. Run:  make monitor-test        (verify ${MONITOR_CHOICE} integration)"
 fi
 
 echo ""
