@@ -38,6 +38,11 @@ deactivate_deployment() {
   done
 }
 
+# ── Clean up preview database ─────────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/db-cleanup-preview.sh" "$PR_NUMBER" || true
+
 # ── Provider-specific cleanup ──────────────────────────
 # Most providers (Vercel, Netlify, Cloudflare) manage preview lifecycle
 # automatically — previews are immutable and auto-expire. Only Fly.io

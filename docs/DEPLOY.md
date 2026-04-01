@@ -175,3 +175,131 @@ Requires: `DEPLOY_TOKEN` = Fly auth token, `DEPLOY_PROJECT_ID` = app name
 
 Edit both `pr-preview.sh` and `pr-cleanup.sh` directly.
 The only contract: write the preview URL to `.deploy-artifacts/preview-url.txt`.
+
+## Database integration
+
+The deploy pipeline includes optional database provisioning and migration support.
+This is configured automatically when you select a database and ORM in `make init`.
+
+### How migrations work
+
+| Context | What happens |
+|---------|-------------|
+| **Production deploy** | `production.sh` runs `db-migrate.sh` before deploying new code |
+| **PR preview deploy** | `pr-preview.sh` provisions a PR-isolated namespace, runs migrations, then deploys |
+| **PR cleanup** | `pr-cleanup.sh` drops the PR namespace (schema/database) |
+| **CI** | Service containers provide a test database; migrations run before tests |
+| **Fly.io** | `fly.toml` includes a `release_command` that runs migrations on each deploy |
+| **Native mode** | Migrations are baked into the build command (`vercel.json`, `netlify.toml`) |
+
+### Supported ORMs
+
+| ORM | Migration command | Notes |
+|-----|------------------|-------|
+| Prisma | `npx prisma migrate deploy` | |
+| Drizzle | `npx drizzle-kit migrate` | |
+| TypeORM | `npx typeorm migration:run` | |
+| Knex.js | `npx knex migrate:latest` | |
+| SQLAlchemy | `alembic upgrade head` | |
+| Django ORM | `python manage.py migrate --noinput` | |
+| ActiveRecord | `bundle exec rails db:migrate` | |
+| Diesel | `diesel migration run` | |
+| Ecto | `mix ecto.migrate` | |
+| SeaORM | `sea-orm-cli migrate up` | |
+| sqlx | `sqlx migrate run` | |
+| GORM | *(runs in app code)* | AutoMigrate runs on startup — no CLI step |
+| Spring Data JPA | *(runs in app code)* | Flyway/Liquibase run on JVM startup |
+
+Document databases (MongoDB, Redis) skip the migration step since they don't have schema migrations.
+
+### PR database isolation
+
+For SQL databases, each PR gets its own isolated namespace:
+
+- **PostgreSQL**: A schema named `pr_<number>` is created; `search_path` is set in the connection URL
+- **MySQL**: A database named `pr_<number>` is created
+- **MongoDB**: A database named `pr_<number>` is used
+- **SQLite**: A file `data/pr-<number>.db` is created
+- **Redis**: Uses key prefix `pr:<number>:` convention (app must respect `REDIS_KEY_PREFIX`)
+
+When the PR is closed, the namespace is dropped automatically by `pr-cleanup.sh`.
+
+**Native mode limitation:** PR preview DB isolation is only available in scripts mode.
+Native mode providers (Vercel, Netlify, Cloudflare) don't support custom build-time
+provisioning. If you need per-PR DB isolation, use scripts mode or point previews at
+a shared staging database via the provider's environment variable settings.
+
+### Environment variables
+
+These are set as GitHub repo variables/secrets by `make init`:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `DATABASE_URL` | Secret | Connection string for the database |
+| `DB_ENGINE` | Variable | Database engine: `postgres`, `mysql`, `sqlite`, `mongodb`, `redis` |
+| `DB_ORM` | Variable | ORM key: `prisma`, `drizzle`, `sqlalchemy`, `django-orm`, etc. |
+| `DB_HOSTING` | Variable | Hosting mode: `cloud`, `self-hosted`, `local` |
+
+### CI database setup
+
+`ci.yml` includes commented-out database service containers. Uncomment the one
+matching your database engine:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    env:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test
+    ports:
+      - 5432:5432
+```
+
+Then uncomment the migration step and set `DATABASE_URL` to match:
+
+```yaml
+- name: Run database migrations
+  run: ./scripts/deploy/db-migrate.sh
+  env:
+    DATABASE_URL: postgres://test:test@localhost:5432/test
+    DB_ORM: ${{ vars.DB_ORM }}
+```
+
+### Local development
+
+If you selected "Local only" or "Self-hosted" hosting, a `docker-compose.yml` is
+generated with the appropriate database service:
+
+```bash
+make db-up       # Start local database container
+make db-down     # Stop local database container
+make db-logs     # Tail database logs
+make db-migrate  # Run migrations against local database
+```
+
+### Self-hosted on Fly.io
+
+If you selected "Self-hosted" with Fly.io as deploy provider, the wizard offers
+to create a managed Fly Postgres cluster:
+
+```bash
+fly postgres create --name <project>-db --region iad
+fly postgres attach <project>-db --app <project>
+```
+
+The `DATABASE_URL` is set as a Fly secret automatically. The generated `fly.toml`
+includes a `release_command` that runs migrations before each deploy:
+
+```toml
+[deploy]
+  release_command = "./scripts/deploy/db-migrate.sh"
+```
+
+### Self-hosted with Docker
+
+For non-Fly deploy providers with self-hosted databases, a `docker-compose.yml`
+is generated. Use the `make db-*` targets to manage the container locally.
+For production, you'll need to provision the database on your hosting platform
+and set `DATABASE_URL` as an environment variable.

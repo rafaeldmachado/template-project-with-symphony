@@ -1965,7 +1965,7 @@ if [ -n "$DB_ENGINE" ]; then
       info "The database will be deployed alongside your app."
       info "Provisioning details depend on your deploy provider (selected next)."
       echo ""
-      info "  Fly.io:      Fly Postgres (managed) or attached volume"
+      info "  Fly.io:      Fly Postgres (managed) — provisioned automatically after deploy setup"
       info "  Docker:      docker-compose service"
       info "  Serverless:  Vercel/Netlify/Cloudflare do NOT support self-hosted databases."
       info "               If you pick a serverless provider, use a cloud-hosted database instead."
@@ -2427,6 +2427,115 @@ if [ -n "$DB_ENGINE" ]; then
     [ "$IS_FULLSTACK" = true ] && DB_TARGET="$ROOT_DIR/backend"
 
     generate_database_layer "$DB_ORM" "$DB_ENGINE" "$STACK_LANG" "$DB_TARGET" "$EFFECTIVE_STACK"
+  fi
+
+  # Generate docker-compose.yml for local/self-hosted database
+  if { [ "$DB_HOSTING" = "local" ] || [ "$DB_HOSTING" = "self-hosted" ]; } && [ "$DB_ENGINE" != "sqlite" ]; then
+    if [ ! -f "$ROOT_DIR/docker-compose.yml" ]; then
+      case "$DB_ENGINE" in
+        postgres)
+          cat > "$ROOT_DIR/docker-compose.yml" <<'DC_EOF'
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+DC_EOF
+          DATABASE_URL="${DATABASE_URL:-postgres://dev:dev@localhost:5432/app}"
+          ok "Generated docker-compose.yml (PostgreSQL 16)"
+          ;;
+        mysql)
+          cat > "$ROOT_DIR/docker-compose.yml" <<'DC_EOF'
+services:
+  db:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: dev
+      MYSQL_DATABASE: app
+      MYSQL_USER: dev
+      MYSQL_PASSWORD: dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysqldata:
+DC_EOF
+          DATABASE_URL="${DATABASE_URL:-mysql://dev:dev@localhost:3306/app}"
+          ok "Generated docker-compose.yml (MySQL 8)"
+          ;;
+        mongodb)
+          cat > "$ROOT_DIR/docker-compose.yml" <<'DC_EOF'
+services:
+  db:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: dev
+      MONGO_INITDB_ROOT_PASSWORD: dev
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodata:
+DC_EOF
+          DATABASE_URL="${DATABASE_URL:-mongodb://dev:dev@localhost:27017/app}"
+          ok "Generated docker-compose.yml (MongoDB 7)"
+          ;;
+        redis)
+          cat > "$ROOT_DIR/docker-compose.yml" <<'DC_EOF'
+services:
+  db:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redisdata:
+DC_EOF
+          DATABASE_URL="${DATABASE_URL:-redis://localhost:6379}"
+          ok "Generated docker-compose.yml (Redis 7)"
+          ;;
+      esac
+      info "Run 'make db-up' to start the database, 'make db-down' to stop."
+    fi
   fi
 fi
 
@@ -3021,7 +3130,19 @@ if [ -n "$DEPLOY_PROVIDER_KEY" ] && [ "$DEPLOY_MODE" != "custom" ] && [ "$DEPLOY
 
           # Generate vercel.json
           if [ ! -f "$ROOT_DIR/vercel.json" ]; then
-            cat > "$ROOT_DIR/vercel.json" <<'VERCEL_NATIVE_EOF'
+            if [ -n "$DB_ENGINE" ] && [ "${DB_ORM:-none}" != "none" ]; then
+              cat > "$ROOT_DIR/vercel.json" <<'VERCEL_NATIVE_EOF'
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "./scripts/deploy/db-migrate.sh && npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm ci"
+}
+VERCEL_NATIVE_EOF
+              ok "Generated vercel.json with migration in buildCommand"
+              info "Set DATABASE_URL in Vercel project environment variables."
+            else
+              cat > "$ROOT_DIR/vercel.json" <<'VERCEL_NATIVE_EOF'
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
@@ -3029,7 +3150,8 @@ if [ -n "$DEPLOY_PROVIDER_KEY" ] && [ "$DEPLOY_MODE" != "custom" ] && [ "$DEPLOY
   "installCommand": "npm ci"
 }
 VERCEL_NATIVE_EOF
-            ok "Generated vercel.json (edit buildCommand/outputDirectory for your stack)"
+              ok "Generated vercel.json (edit buildCommand/outputDirectory for your stack)"
+            fi
           fi
           ;;
 
@@ -3046,7 +3168,21 @@ VERCEL_NATIVE_EOF
 
           # Generate netlify.toml if not created by netlify init
           if [ ! -f "$ROOT_DIR/netlify.toml" ]; then
-            cat > "$ROOT_DIR/netlify.toml" <<'NETLIFY_NATIVE_EOF'
+            if [ -n "$DB_ENGINE" ] && [ "${DB_ORM:-none}" != "none" ]; then
+              cat > "$ROOT_DIR/netlify.toml" <<'NETLIFY_NATIVE_EOF'
+[build]
+  command = "./scripts/deploy/db-migrate.sh && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# PR deploy previews are handled automatically by Netlify's Git integration
+NETLIFY_NATIVE_EOF
+              ok "Generated netlify.toml with migration in build command"
+              info "Set DATABASE_URL in Netlify site environment variables."
+            else
+              cat > "$ROOT_DIR/netlify.toml" <<'NETLIFY_NATIVE_EOF'
 [build]
   command = "npm run build"
   publish = "dist"
@@ -3056,7 +3192,8 @@ VERCEL_NATIVE_EOF
 
 # PR deploy previews are handled automatically by Netlify's Git integration
 NETLIFY_NATIVE_EOF
-            ok "Generated netlify.toml (edit command/publish for your stack)"
+              ok "Generated netlify.toml (edit command/publish for your stack)"
+            fi
           fi
           ;;
 
@@ -3098,9 +3235,24 @@ WRANGLER_NATIVE_EOF
             info "Then run: fly launch --no-deploy"
           fi
 
+          # Add release_command for migrations if fly.toml exists
+          if [ -n "$DB_ENGINE" ] && [ "${DB_ORM:-none}" != "none" ] && [ -f "$ROOT_DIR/fly.toml" ]; then
+            if ! grep -q 'release_command' "$ROOT_DIR/fly.toml"; then
+              cat >> "$ROOT_DIR/fly.toml" <<'FLY_NATIVE_RELEASE_EOF'
+
+[deploy]
+  release_command = "./scripts/deploy/db-migrate.sh"
+FLY_NATIVE_RELEASE_EOF
+              ok "Added release_command for migrations to fly.toml"
+            fi
+          fi
+
           echo ""
           warn "Fly.io native mode: only production deploys on main are automatic."
           info "PR preview deploys are not available in native mode."
+          if [ -n "$DB_ENGINE" ] && [ "${DB_ORM:-none}" != "none" ]; then
+            info "PR preview DB isolation requires scripts mode. Consider switching if needed."
+          fi
           ;;
       esac
 
@@ -3240,8 +3392,8 @@ WRANGLER_SCRIPTS_EOF
           fi
           ;;
         fly)
+          FLY_APP_S="${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
           if [ ! -f "$ROOT_DIR/fly.toml" ] && confirm "Generate fly.toml with defaults?"; then
-            FLY_APP_S="${DEPLOY_PROJECT_ID:-$PROJECT_NAME}"
             cat > "$ROOT_DIR/fly.toml" <<FLY_SCRIPTS_EOF
 app = "${FLY_APP_S}"
 primary_region = "iad"
@@ -3255,7 +3407,43 @@ primary_region = "iad"
   auto_start_machines = true
   min_machines_running = 0
 FLY_SCRIPTS_EOF
-            ok "Generated fly.toml"
+
+            # Add release_command for database migrations
+            if [ -n "$DB_ENGINE" ] && [ "${DB_ORM:-none}" != "none" ]; then
+              cat >> "$ROOT_DIR/fly.toml" <<'FLY_RELEASE_EOF'
+
+[deploy]
+  release_command = "./scripts/deploy/db-migrate.sh"
+FLY_RELEASE_EOF
+              ok "Generated fly.toml with release_command for migrations"
+            else
+              ok "Generated fly.toml"
+            fi
+          fi
+
+          # Provision Fly Postgres if self-hosted DB was selected
+          if [ "$DB_HOSTING" = "self-hosted" ] && [ "$DB_ENGINE" = "postgres" ]; then
+            echo ""
+            if command -v fly &>/dev/null; then
+              if confirm "Create a Fly Postgres cluster for this app?"; then
+                FLY_DB_NAME="${FLY_APP_S}-db"
+                [ -n "${DEPLOY_TOKEN:-}" ] && export FLY_API_TOKEN="$DEPLOY_TOKEN"
+                if fly postgres create --name "$FLY_DB_NAME" --region iad 2>&1; then
+                  ok "Created Fly Postgres cluster: ${FLY_DB_NAME}"
+                  if fly postgres attach "$FLY_DB_NAME" --app "$FLY_APP_S" 2>&1; then
+                    ok "Attached ${FLY_DB_NAME} to ${FLY_APP_S}"
+                    info "DATABASE_URL has been set as a Fly secret automatically."
+                  else
+                    warn "Failed to attach Postgres — run: fly postgres attach ${FLY_DB_NAME} --app ${FLY_APP_S}"
+                  fi
+                else
+                  warn "Failed to create Fly Postgres — run: fly postgres create --name ${FLY_DB_NAME}"
+                fi
+              fi
+            else
+              info "Install Fly CLI to provision Fly Postgres: https://fly.io/docs/hands-on/install-flyctl/"
+              info "Then run: fly postgres create --name ${FLY_APP_S}-db && fly postgres attach ${FLY_APP_S}-db --app ${FLY_APP_S}"
+            fi
           fi
           ;;
       esac

@@ -2,6 +2,7 @@
        gc gc-branches gc-worktrees gc-deploys gc-artifacts \
        deploy-preview deploy-cleanup deploy-prod test-template \
        setup-runner runner-start runner-stop runner-status runner-remove \
+       db-up db-down db-logs db-migrate \
        monitor-test
 
 SHELL := /bin/bash
@@ -104,6 +105,24 @@ endif
 
 deploy-prod: ## Deploy to production
 	@./scripts/deploy/production.sh
+
+# ──────────────────────────────────────────────
+# Database
+# ──────────────────────────────────────────────
+
+db-up: ## Start local database (docker compose up)
+	@docker compose up -d db
+	@echo "Database started."
+
+db-down: ## Stop local database (docker compose down)
+	@docker compose down
+	@echo "Database stopped."
+
+db-logs: ## Show local database logs
+	@docker compose logs -f db
+
+db-migrate: ## Run database migrations
+	@./scripts/deploy/db-migrate.sh
 
 # ──────────────────────────────────────────────
 # Self-hosted runner

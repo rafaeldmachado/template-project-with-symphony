@@ -17,6 +17,39 @@ jobs:
   checks:
     name: All checks
     runs-on: ${{ vars.RUNNER || 'self-hosted' }}
+
+    # ── Database service container (uncomment for your DB) ──
+    # services:
+    #   postgres:
+    #     image: postgres:16
+    #     env:
+    #       POSTGRES_USER: test
+    #       POSTGRES_PASSWORD: test
+    #       POSTGRES_DB: test
+    #     ports:
+    #       - 5432:5432
+    #     options: >-
+    #       --health-cmd pg_isready
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
+    #   # mysql:
+    #   #   image: mysql:8
+    #   #   env:
+    #   #     MYSQL_ROOT_PASSWORD: test
+    #   #     MYSQL_DATABASE: test
+    #   #   ports:
+    #   #     - 3306:3306
+    #   #   options: >-
+    #   #     --health-cmd "mysqladmin ping -h localhost"
+    #   #     --health-interval 10s
+    #   #     --health-timeout 5s
+    #   #     --health-retries 5
+    #   # mongo:
+    #   #   image: mongo:7
+    #   #   ports:
+    #   #     - 27017:27017
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +60,13 @@ jobs:
       #     node-version: '22'
       #     cache: 'npm'
       # - run: npm ci
+
+      # ── Database migrations (uncomment if using a database) ──
+      # - name: Run database migrations
+      #   run: ./scripts/deploy/db-migrate.sh
+      #   env:
+      #     DATABASE_URL: postgres://test:test@localhost:5432/test
+      #     DB_ORM: ${{ vars.DB_ORM }}
 
       - name: Run all checks
         run: ./scripts/checks/run-all.sh

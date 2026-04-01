@@ -76,6 +76,14 @@ require_var() {
 
 create_deployment
 
+# ── Run database migrations ──────────────────────────
+
+if ! "$ROOT_DIR/scripts/deploy/db-migrate.sh"; then
+  echo "ERROR: [deploy] Database migration failed."
+  update_deployment_failure
+  exit 1
+fi
+
 # ── Provider-specific deploy ───────────────────────────
 
 PROD_URL=""

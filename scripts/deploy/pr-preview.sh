@@ -87,6 +87,29 @@ require_var() {
 
 create_deployment
 
+# ── Provision preview database ────────────────────────
+
+if [ -n "${DB_ENGINE:-}" ] && [ "${DB_ORM:-none}" != "none" ]; then
+  if ! "$ROOT_DIR/scripts/deploy/db-provision-preview.sh" "$PR_NUMBER"; then
+    echo "ERROR: [deploy] Preview database provisioning failed."
+    update_deployment_failure
+    exit 1
+  fi
+
+  # Use the PR-specific DATABASE_URL for migrations and the app
+  PR_DB_URL_FILE="$ARTIFACT_DIR/preview-db-url.txt"
+  if [ -f "$PR_DB_URL_FILE" ]; then
+    export DATABASE_URL
+    DATABASE_URL=$(cat "$PR_DB_URL_FILE")
+  fi
+
+  if ! "$ROOT_DIR/scripts/deploy/db-migrate.sh"; then
+    echo "ERROR: [deploy] Preview database migration failed."
+    update_deployment_failure
+    exit 1
+  fi
+fi
+
 # ── Provider-specific deploy ───────────────────────────
 
 deploy_failed=false
@@ -167,6 +190,11 @@ case "$PROVIDER" in
         echo "ERROR: [deploy] Failed to create Fly app: ${APP_NAME}"
         deploy_failed=true
       fi
+    fi
+
+    # Set DATABASE_URL secret on the ephemeral Fly app
+    if [ "$deploy_failed" = "false" ] && [ -n "${DATABASE_URL:-}" ]; then
+      echo "$DATABASE_URL" | fly secrets set DATABASE_URL=- --app "$APP_NAME" 2>/dev/null || true
     fi
 
     if [ "$deploy_failed" = "false" ]; then
