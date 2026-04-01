@@ -687,6 +687,764 @@ MONITOR_README_EOF
   ok "Updated monitoring/README.md for ${provider_label}"
 }
 
+# ── generate_database_layer: emits ORM config, models, migrations, seeds,
+#    connection helpers, integration test, Makefile targets, and db/README.md
+#    Args: $1=orm  $2=engine  $3=lang  $4=target dir  $5=framework name
+#
+#    Each _gen_* helper sets these variables for the orchestrator:
+#      _DB_LABEL  _DB_DOCS  _DB_MIGRATE  _DB_SEED  _DB_RESET  _DB_STUDIO
+#      _DB_ADD_STEPS (how to add new models)
+# ─────────────────────────────────────────────────────────────────────────
+
+_db_vars() {
+  # Set orchestrator variables. Args: label docs migrate seed reset studio add_steps
+  _DB_LABEL="$1"; _DB_DOCS="$2"; _DB_MIGRATE="$3"; _DB_SEED="$4"
+  _DB_RESET="$5"; _DB_STUDIO="$6"; _DB_ADD_STEPS="$7"
+}
+
+_gen_prisma() {
+  local engine="$1" target="$2"
+  local provider=""; case "$engine" in
+    postgres) provider="postgresql" ;; mysql) provider="mysql" ;;
+    sqlite) provider="sqlite" ;; mongodb) provider="mongodb" ;; esac
+
+  local id_field='id        Int      @id @default(autoincrement())'
+  [ "$engine" = "mongodb" ] && id_field='id        String   @id @default(auto()) @map("_id") @db.ObjectId'
+
+  mkdir -p "$target/prisma"
+  cat > "$target/prisma/schema.prisma" <<PRISMA_EOF
+generator client { provider = "prisma-client-js" }
+
+datasource db {
+  provider = "${provider}"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  ${id_field}
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+PRISMA_EOF
+
+  cat > "$target/db.ts" <<'EOF'
+import { PrismaClient } from "@prisma/client";
+const g = globalThis as unknown as { prisma: PrismaClient };
+export const prisma = g.prisma || new PrismaClient();
+if (process.env.NODE_ENV !== "production") g.prisma = prisma;
+export default prisma;
+EOF
+
+  cat > "$target/prisma/seed.ts" <<'EOF'
+import { prisma } from "../db";
+async function main() {
+  await prisma.user.upsert({
+    where: { email: "admin@example.com" },
+    update: {},
+    create: { email: "admin@example.com", name: "Admin User" },
+  });
+}
+main().then(() => prisma.$disconnect()).catch((e) => { console.error(e); process.exit(1); });
+EOF
+
+  if [ -f "$target/package.json" ]; then
+    cd "$target"
+    npm install @prisma/client 2>/dev/null || true
+    npm install -D prisma tsx 2>/dev/null || true
+    npm pkg set scripts.db:migrate="prisma migrate dev" scripts.db:push="prisma db push" \
+      scripts.db:seed="tsx prisma/seed.ts" scripts.db:studio="prisma studio" \
+      scripts.db:reset="prisma migrate reset" prisma.seed="tsx prisma/seed.ts" 2>/dev/null || true
+    cd "$ROOT_DIR"
+  fi
+  ok "Generated Prisma setup (schema, client, seed)"
+
+  _db_vars "Prisma" "https://www.prisma.io/docs" \
+    "npx prisma migrate dev" "npx prisma db seed" \
+    "npx prisma migrate reset --force" "npx prisma studio" \
+    "Edit prisma/schema.prisma, run npx prisma migrate dev --name <name>"
+}
+
+_gen_drizzle() {
+  local engine="$1" target="$2"
+  local dialect="" driver_pkg=""
+  case "$engine" in
+    postgres) dialect="postgresql"; driver_pkg="postgres" ;;
+    mysql)    dialect="mysql";      driver_pkg="mysql2" ;;
+    sqlite)   dialect="sqlite";     driver_pkg="better-sqlite3 @types/better-sqlite3" ;;
+  esac
+
+  mkdir -p "$target/db"
+  cat > "$target/drizzle.config.ts" <<DCFG
+import { defineConfig } from "drizzle-kit";
+export default defineConfig({
+  out: "./drizzle", schema: "./db/schema.ts", dialect: "${dialect}",
+  dbCredentials: { url: process.env.DATABASE_URL! },
+});
+DCFG
+
+  case "$engine" in
+    postgres) cat > "$target/db/schema.ts" <<'EOF'
+import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(), email: text("email").notNull().unique(),
+  name: text("name"), createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+EOF
+      cat > "$target/db/index.ts" <<'EOF'
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "./schema";
+export const db = drizzle(postgres(process.env.DATABASE_URL!), { schema });
+EOF
+      ;;
+    mysql) cat > "$target/db/schema.ts" <<'EOF'
+import { mysqlTable, serial, varchar, timestamp } from "drizzle-orm/mysql-core";
+export const users = mysqlTable("users", {
+  id: serial("id").primaryKey(), email: varchar("email", { length: 255 }).notNull().unique(),
+  name: varchar("name", { length: 255 }), createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+EOF
+      cat > "$target/db/index.ts" <<'EOF'
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
+import * as schema from "./schema";
+const connection = await mysql.createConnection(process.env.DATABASE_URL!);
+export const db = drizzle(connection, { schema });
+EOF
+      ;;
+    sqlite) cat > "$target/db/schema.ts" <<'EOF'
+import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }), email: text("email").notNull().unique(),
+  name: text("name"), createdAt: text("created_at").default(sql`(CURRENT_TIMESTAMP)`).notNull(),
+  updatedAt: text("updated_at").default(sql`(CURRENT_TIMESTAMP)`).notNull(),
+});
+EOF
+      cat > "$target/db/index.ts" <<'EOF'
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import Database from "better-sqlite3";
+import * as schema from "./schema";
+export const db = drizzle(new Database(process.env.DATABASE_URL!.replace("file:", "")), { schema });
+EOF
+      ;;
+  esac
+
+  cat > "$target/db/seed.ts" <<'EOF'
+import { db } from "./index";
+import { users } from "./schema";
+await db.insert(users).values({ email: "admin@example.com", name: "Admin User" });
+console.log("Seeded users table.");
+EOF
+
+  if [ -f "$target/package.json" ]; then
+    cd "$target"
+    npm install drizzle-orm $driver_pkg 2>/dev/null || true
+    npm install -D drizzle-kit tsx 2>/dev/null || true
+    npm pkg set scripts.db:migrate="drizzle-kit push" scripts.db:generate="drizzle-kit generate" \
+      scripts.db:seed="tsx db/seed.ts" scripts.db:studio="drizzle-kit studio" 2>/dev/null || true
+    cd "$ROOT_DIR"
+  fi
+  ok "Generated Drizzle setup (config, schema, client, seed)"
+
+  _db_vars "Drizzle" "https://orm.drizzle.team/docs/overview" \
+    "npx drizzle-kit push" "npx tsx db/seed.ts" \
+    "npx drizzle-kit push --force" "npx drizzle-kit studio" \
+    "Add table in db/schema.ts, run npx drizzle-kit generate && npx drizzle-kit push"
+}
+
+_gen_mongoose() {
+  local target="$1"
+  mkdir -p "$target/db" "$target/models"
+
+  cat > "$target/db/connection.ts" <<'EOF'
+import mongoose from "mongoose";
+const cached = (globalThis as any).__mongo || ((globalThis as any).__mongo = { conn: null });
+export async function connectDB() {
+  if (cached.conn) return cached.conn;
+  cached.conn = await mongoose.connect(process.env.DATABASE_URL!);
+  return cached.conn;
+}
+EOF
+
+  cat > "$target/models/User.ts" <<'EOF'
+import mongoose, { Schema } from "mongoose";
+const UserSchema = new Schema(
+  { email: { type: String, required: true, unique: true }, name: String },
+  { timestamps: true }
+);
+export const User = mongoose.models.User || mongoose.model("User", UserSchema);
+EOF
+
+  cat > "$target/db/seed.ts" <<'EOF'
+import { connectDB } from "./connection";
+import { User } from "../models/User";
+await connectDB();
+await User.findOneAndUpdate({ email: "admin@example.com" },
+  { email: "admin@example.com", name: "Admin User" }, { upsert: true });
+console.log("Seeded User collection.");
+process.exit(0);
+EOF
+
+  if [ -f "$target/package.json" ]; then
+    cd "$target"
+    npm install mongoose 2>/dev/null || true
+    npm install -D tsx 2>/dev/null || true
+    npm pkg set scripts.db:seed="tsx db/seed.ts" 2>/dev/null || true
+    cd "$ROOT_DIR"
+  fi
+  ok "Generated Mongoose setup (connection, model, seed)"
+
+  _db_vars "Mongoose" "https://mongoosejs.com/docs/guide.html" \
+    "echo 'MongoDB is schema-less — no migrations needed'" "npx tsx db/seed.ts" \
+    "npx tsx db/seed.ts" "echo 'Use MongoDB Compass or mongosh'" \
+    "Create schema in models/, export the model — MongoDB creates collections on first write"
+}
+
+_gen_sqlalchemy() {
+  local engine="$1" target="$2"
+  local pip_driver=""
+  case "$engine" in
+    postgres) pip_driver="psycopg2-binary" ;; mysql) pip_driver="pymysql" ;;
+  esac
+
+  mkdir -p "$target/app/models" "$target/alembic/versions"
+
+  cat > "$target/app/db.py" <<'EOF'
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try: yield db
+    finally: db.close()
+EOF
+
+  cat > "$target/app/models/__init__.py" <<'EOF'
+from .base import Base
+from .user import User
+__all__ = ["Base", "User"]
+EOF
+
+  cat > "$target/app/models/base.py" <<'EOF'
+from sqlalchemy.orm import DeclarativeBase
+class Base(DeclarativeBase): pass
+EOF
+
+  cat > "$target/app/models/user.py" <<'EOF'
+from datetime import datetime
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+from .base import Base
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+EOF
+
+  cat > "$target/alembic.ini" <<'EOF'
+[alembic]
+script_location = alembic
+sqlalchemy.url =
+EOF
+
+  cat > "$target/alembic/env.py" <<'EOF'
+import os
+from sqlalchemy import engine_from_config, pool
+from alembic import context
+
+config = context.config
+config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+
+from app.models import Base
+target_metadata = Base.metadata
+
+def run_migrations_offline():
+    context.configure(url=config.get_main_option("sqlalchemy.url"),
+                      target_metadata=target_metadata, literal_binds=True)
+    with context.begin_transaction(): context.run_migrations()
+
+def run_migrations_online():
+    connectable = engine_from_config(config.get_section(config.config_ini_section, {}),
+                                     prefix="sqlalchemy.", poolclass=pool.NullPool)
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction(): context.run_migrations()
+
+if context.is_offline_mode(): run_migrations_offline()
+else: run_migrations_online()
+EOF
+
+  cat > "$target/app/seed.py" <<'EOF'
+"""Run with: python -m app.seed"""
+from app.db import SessionLocal
+from app.models.user import User
+
+db = SessionLocal()
+if not db.query(User).filter_by(email="admin@example.com").first():
+    db.add(User(email="admin@example.com", name="Admin User"))
+    db.commit()
+    print("Seeded admin user.")
+db.close()
+EOF
+
+  if [ -f "$target/requirements.txt" ]; then
+    for pkg in sqlalchemy alembic $pip_driver; do
+      [ -z "$pkg" ] && continue
+      grep -q "$pkg" "$target/requirements.txt" || echo "$pkg" >> "$target/requirements.txt"
+    done
+  fi
+  ok "Generated SQLAlchemy + Alembic setup"
+
+  _db_vars "SQLAlchemy + Alembic" "https://docs.sqlalchemy.org/en/20/" \
+    "alembic upgrade head" "python -m app.seed" \
+    "alembic downgrade base && alembic upgrade head" \
+    "echo 'Use pgAdmin, DBeaver, or your database CLI'" \
+    "Create model in app/models/, import in __init__.py, run alembic revision --autogenerate -m '<desc>'"
+}
+
+_gen_django_orm() {
+  local engine="$1" target="$2"
+  local dj_driver=""
+  case "$engine" in postgres) dj_driver="psycopg2-binary" ;; mysql) dj_driver="mysqlclient" ;; esac
+
+  mkdir -p "$target/config"
+  cat > "$target/config/db_settings.py" <<'EOF'
+"""Import in settings.py: from config.db_settings import DATABASES"""
+import dj_database_url
+DATABASES = {"default": dj_database_url.config(default="sqlite:///db.sqlite3",
+             conn_max_age=600, conn_health_checks=True)}
+EOF
+
+  # Try to patch settings.py if it exists
+  if [ -f "$target/config/settings.py" ] && grep -q 'DATABASES' "$target/config/settings.py"; then
+    sed -i.bak '/^DATABASES/,/^}/d' "$target/config/settings.py"
+    echo 'from config.db_settings import DATABASES  # noqa: F401' >> "$target/config/settings.py"
+    rm -f "$target/config/settings.py.bak"
+    ok "Patched config/settings.py to use dj-database-url"
+  else
+    ok "Generated config/db_settings.py"
+  fi
+
+  if [ -f "$target/requirements.txt" ]; then
+    for pkg in dj-database-url $dj_driver; do
+      [ -z "$pkg" ] && continue
+      grep -q "$pkg" "$target/requirements.txt" || echo "$pkg" >> "$target/requirements.txt"
+    done
+  fi
+
+  _db_vars "Django ORM" "https://docs.djangoproject.com/en/5.0/topics/db/" \
+    "python manage.py migrate" "python manage.py loaddata seed" \
+    "python manage.py flush --no-input && python manage.py migrate" \
+    "python manage.py dbshell" \
+    "Add model in app/models.py, run python manage.py makemigrations && migrate"
+}
+
+_gen_gorm() {
+  local engine="$1" target="$2"
+  local driver_import="" dial_func="" go_driver=""
+  case "$engine" in
+    postgres) driver_import="gorm.io/driver/postgres"; dial_func="postgres.Open(dsn)"; go_driver="$driver_import" ;;
+    mysql)    driver_import="gorm.io/driver/mysql";    dial_func="mysql.Open(dsn)";    go_driver="$driver_import" ;;
+    sqlite)   driver_import="gorm.io/driver/sqlite";   dial_func="sqlite.Open(dsn)";   go_driver="$driver_import" ;;
+  esac
+
+  mkdir -p "$target/db" "$target/models"
+
+  cat > "$target/db/db.go" <<GORM_EOF
+package db
+
+import (
+	"log"
+	"os"
+	"gorm.io/gorm"
+	"${driver_import}"
+)
+
+var DB *gorm.DB
+
+func Connect() *gorm.DB {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" { log.Fatal("DATABASE_URL environment variable is not set") }
+	var err error
+	DB, err = gorm.Open(${dial_func}, &gorm.Config{})
+	if err != nil { log.Fatalf("failed to connect to database: %v", err) }
+	return DB
+}
+GORM_EOF
+
+  cat > "$target/models/user.go" <<'EOF'
+package models
+import "time"
+type User struct {
+	ID    uint    `gorm:"primaryKey" json:"id"`
+	Email string  `gorm:"uniqueIndex;not null;size:255" json:"email"`
+	Name  *string `gorm:"size:255" json:"name,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+EOF
+
+  cat > "$target/db/migrate.go" <<'EOF'
+package db
+import ("log"; "__MODULE__/models")
+func Migrate() {
+	if DB == nil { log.Fatal("call Connect() first") }
+	if err := DB.AutoMigrate(&models.User{}); err != nil { log.Fatalf("migrate: %v", err) }
+	log.Println("migration complete")
+}
+EOF
+
+  if [ -f "$target/go.mod" ]; then
+    local mod; mod=$(head -1 "$target/go.mod" | awk '{print $2}')
+    sed -i.bak "s|__MODULE__|${mod}|g" "$target/db/migrate.go"
+    rm -f "$target/db/migrate.go.bak"
+    cd "$target" && go get gorm.io/gorm "$go_driver" 2>/dev/null && cd "$ROOT_DIR" || true
+  fi
+  ok "Generated GORM setup (connection, model, migrate)"
+
+  _db_vars "GORM" "https://gorm.io/docs/" \
+    "go run ./cmd/migrate" "go run ./cmd/seed" \
+    "echo 'Drop DB and re-run: make db-migrate && make db-seed'" \
+    "echo 'Use pgAdmin, DBeaver, or your database CLI'" \
+    "Create struct in models/, add to AutoMigrate() in db/migrate.go"
+}
+
+_gen_activerecord() {
+  local engine="$1" target="$2"
+  local adapter="" gem=""
+  case "$engine" in postgres) adapter="postgresql"; gem="pg" ;; mysql) adapter="mysql2"; gem="mysql2" ;; sqlite) adapter="sqlite3"; gem="sqlite3" ;; esac
+
+  mkdir -p "$target/config" "$target/db/migrate" "$target/app/models"
+  cat > "$target/config/database.yml" <<AR_EOF
+default: &default
+  adapter: ${adapter}
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+development: { <<: *default, url: "<%= ENV['DATABASE_URL'] %>" }
+test:        { <<: *default, url: "<%= ENV['DATABASE_URL'] %>_test" }
+production:  { <<: *default, url: "<%= ENV['DATABASE_URL'] %>" }
+AR_EOF
+
+  cat > "$target/db/migrate/001_create_users.rb" <<'EOF'
+class CreateUsers < ActiveRecord::Migration[7.1]
+  def change
+    create_table :users do |t|
+      t.string :email, null: false
+      t.string :name
+      t.timestamps
+    end
+    add_index :users, :email, unique: true
+  end
+end
+EOF
+
+  echo 'class User < ApplicationRecord; validates :email, presence: true, uniqueness: true; end' \
+    > "$target/app/models/user.rb"
+
+  cat > "$target/db/seeds.rb" <<'EOF'
+User.find_or_create_by!(email: "admin@example.com") { |u| u.name = "Admin User" }
+puts "Seeded admin user."
+EOF
+
+  [ -f "$target/Gemfile" ] && ! grep -q "'${gem}'" "$target/Gemfile" && echo "gem '${gem}'" >> "$target/Gemfile"
+  ok "Generated ActiveRecord setup"
+
+  _db_vars "ActiveRecord" "https://guides.rubyonrails.org/active_record_basics.html" \
+    "bundle exec rails db:migrate" "bundle exec rails db:seed" \
+    "bundle exec rails db:reset" "bundle exec rails dbconsole" \
+    "Run: rails generate model <Name> <fields>, then rails db:migrate"
+}
+
+_gen_ecto() {
+  local engine="$1" target="$2" pname="$3"
+  local adapter=""; case "$engine" in postgres) adapter="Ecto.Adapters.Postgres" ;; mysql) adapter="Ecto.Adapters.MyXQL" ;; sqlite) adapter="Ecto.Adapters.SQLite3" ;; esac
+  local app_mod; app_mod=$(echo "$pname" | sed 's/[^a-zA-Z0-9]//g; s/^\(.\)/\U\1/')
+  local app_atom; app_atom=$(echo "$pname" | tr '[:upper:]' '[:lower:]')
+
+  mkdir -p "$target/lib/${app_atom}" "$target/config" "$target/priv/repo/migrations"
+
+  cat > "$target/lib/${app_atom}/repo.ex" <<ECTO_EOF
+defmodule ${app_mod}.Repo do
+  use Ecto.Repo, otp_app: :${app_atom}, adapter: ${adapter}
+end
+ECTO_EOF
+
+  [ -f "$target/config/dev.exs" ] && cat >> "$target/config/dev.exs" <<ECTO_DEV
+config :${app_atom}, ${app_mod}.Repo, url: System.get_env("DATABASE_URL"), pool_size: 10
+ECTO_DEV
+
+  [ -f "$target/config/runtime.exs" ] && cat >> "$target/config/runtime.exs" <<ECTO_RT
+config :${app_atom}, ${app_mod}.Repo,
+  url: System.get_env("DATABASE_URL") || raise("DATABASE_URL not set"),
+  pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
+ECTO_RT
+
+  cat > "$target/priv/repo/migrations/001_create_users.exs" <<ECTO_MIG
+defmodule ${app_mod}.Repo.Migrations.CreateUsers do
+  use Ecto.Migration
+  def change do
+    create table(:users) do
+      add :email, :string, null: false
+      add :name, :string
+      timestamps()
+    end
+    create unique_index(:users, [:email])
+  end
+end
+ECTO_MIG
+
+  cat > "$target/priv/repo/seeds.exs" <<ECTO_SEED
+${app_mod}.Repo.insert!(%${app_mod}.User{email: "admin@example.com", name: "Admin User"})
+IO.puts("Seeded admin user.")
+ECTO_SEED
+  ok "Generated Ecto setup"
+
+  _db_vars "Ecto" "https://hexdocs.pm/ecto/Ecto.html" \
+    "mix ecto.migrate" "mix run priv/repo/seeds.exs" \
+    "mix ecto.reset" "echo 'Use iex -S mix for interactive queries'" \
+    "Run: mix phx.gen.schema <Schema> <table> <fields>, then mix ecto.migrate"
+}
+
+_gen_spring_data_jpa() {
+  local engine="$1" target="$2"
+  local driver="" dialect="" fallback_url=""
+  case "$engine" in
+    postgres) driver="org.postgresql.Driver"; dialect="org.hibernate.dialect.PostgreSQLDialect"; fallback_url="jdbc:postgresql://localhost:5432/dbname" ;;
+    mysql)    driver="com.mysql.cj.jdbc.Driver"; dialect="org.hibernate.dialect.MySQLDialect"; fallback_url="jdbc:mysql://localhost:3306/dbname" ;;
+    sqlite)   driver="org.sqlite.JDBC"; dialect="org.hibernate.community.dialect.SQLiteDialect"; fallback_url="jdbc:sqlite:dev.db" ;;
+  esac
+
+  mkdir -p "$target/src/main/resources/db/migration" \
+           "$target/src/main/java/com/example/model" \
+           "$target/src/main/java/com/example/repository"
+
+  cat > "$target/src/main/resources/application.properties" <<SPRING_EOF
+spring.datasource.url=\${DATABASE_URL:${fallback_url}}
+spring.datasource.driver-class-name=${driver}
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.properties.hibernate.dialect=${dialect}
+spring.flyway.enabled=true
+spring.flyway.locations=classpath:db/migration
+SPRING_EOF
+
+  cat > "$target/src/main/java/com/example/model/User.java" <<'EOF'
+package com.example.model;
+import jakarta.persistence.*;
+import java.time.Instant;
+
+@Entity @Table(name = "users")
+public class User {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
+    @Column(nullable = false, unique = true) private String email;
+    private String name;
+    @Column(name = "created_at") private Instant createdAt = Instant.now();
+    @Column(name = "updated_at") private Instant updatedAt = Instant.now();
+
+    public Long getId() { return id; }
+    public String getEmail() { return email; }
+    public void setEmail(String e) { this.email = e; }
+    public String getName() { return name; }
+    public void setName(String n) { this.name = n; }
+    @PreUpdate public void preUpdate() { this.updatedAt = Instant.now(); }
+}
+EOF
+
+  cat > "$target/src/main/java/com/example/repository/UserRepository.java" <<'EOF'
+package com.example.repository;
+import com.example.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.Optional;
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);
+}
+EOF
+
+  cat > "$target/src/main/resources/db/migration/V1__create_users.sql" <<'EOF'
+CREATE TABLE users (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE, name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+EOF
+  ok "Generated Spring Data JPA setup"
+
+  _db_vars "Spring Data JPA" "https://spring.io/projects/spring-data-jpa" \
+    "./gradlew flywayMigrate" "echo 'Add seed data via Flyway migration or CommandLineRunner'" \
+    "./gradlew flywayClean flywayMigrate" "echo 'Use your IDE database tools'" \
+    "Create @Entity in model/, JpaRepository in repository/, Flyway migration in db/migration/"
+}
+
+# ── Orchestrator ─────────────────────────────────────
+
+generate_database_layer() {
+  local orm="$1" engine="$2" lang="$3" target="$4" framework="$5"
+
+  _DB_LABEL="" _DB_DOCS="" _DB_MIGRATE="" _DB_SEED="" _DB_RESET="" _DB_STUDIO="" _DB_ADD_STEPS=""
+
+  case "$orm" in
+    prisma)          _gen_prisma "$engine" "$target" ;;
+    drizzle)         _gen_drizzle "$engine" "$target" ;;
+    mongoose)        _gen_mongoose "$target" ;;
+    sqlalchemy)      _gen_sqlalchemy "$engine" "$target" ;;
+    django-orm)      _gen_django_orm "$engine" "$target" ;;
+    gorm)            _gen_gorm "$engine" "$target" ;;
+    activerecord)    _gen_activerecord "$engine" "$target" ;;
+    ecto)            _gen_ecto "$engine" "$target" "$PROJECT_NAME" ;;
+    spring-data-jpa) _gen_spring_data_jpa "$engine" "$target" ;;
+    *) warn "No code generator for ORM '$orm' — configure manually." ; return ;;
+  esac
+
+  # ── db/README.md (uses _DB_* vars set by helpers) ──
+  mkdir -p "$target/db"
+  cat > "$target/db/README.md" <<DB_README
+# Database
+
+**Engine:** ${engine} | **ORM:** ${_DB_LABEL}
+
+## Commands
+
+\`\`\`bash
+make db-migrate    # ${_DB_MIGRATE}
+make db-seed       # ${_DB_SEED}
+make db-reset      # ${_DB_RESET}
+make db-studio     # ${_DB_STUDIO}
+\`\`\`
+
+Set \`DATABASE_URL\` in \`.env\` (see \`.env.example\` for format).
+
+## Adding Models
+
+${_DB_ADD_STEPS}
+
+## Docs
+
+${_DB_DOCS}
+DB_README
+  ok "Generated db/README.md"
+
+  # ── Integration test (one per language) ────────────
+  mkdir -p "$target/tests/integration"
+  case "$lang" in
+    node) cat > "$target/tests/integration/db-connection.test.ts" <<'EOF'
+import { describe, it, expect } from "vitest";
+describe("Database connection", () => {
+  it("should connect", async () => {
+    // Import your db client (prisma, drizzle, mongoose) and run a trivial query
+    expect(process.env.DATABASE_URL).toBeTruthy();
+  });
+});
+EOF
+      ;;
+    python) cat > "$target/tests/integration/test_db_connection.py" <<'EOF'
+import os, pytest
+@pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="DATABASE_URL not set")
+def test_db_connection():
+    from sqlalchemy import text
+    from app.db import engine
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT 1")).scalar() == 1
+EOF
+      ;;
+    go) cat > "$target/tests/integration/db_connection_test.go" <<'EOF'
+package integration
+import ("os"; "testing"; "__MODULE__/db")
+func TestDatabaseConnection(t *testing.T) {
+	if os.Getenv("DATABASE_URL") == "" { t.Skip("DATABASE_URL not set") }
+	conn := db.Connect()
+	sqlDB, _ := conn.DB()
+	if err := sqlDB.Ping(); err != nil { t.Fatalf("ping: %v", err) }
+}
+EOF
+      if [ -f "$target/go.mod" ]; then
+        local mod; mod=$(head -1 "$target/go.mod" | awk '{print $2}')
+        sed -i.bak "s|__MODULE__|${mod}|g" "$target/tests/integration/db_connection_test.go"
+        rm -f "$target/tests/integration/db_connection_test.go.bak"
+      fi
+      ;;
+    ruby) cat > "$target/tests/integration/db_connection_test.rb" <<'EOF'
+require "test_helper"
+class DatabaseConnectionTest < ActiveSupport::TestCase
+  test("database is reachable") { assert ActiveRecord::Base.connection.active? }
+end
+EOF
+      ;;
+    elixir) cat > "$target/tests/integration/db_connection_test.exs" <<'EOF'
+defmodule DatabaseConnectionTest do
+  use ExUnit.Case
+  test "database is reachable" do
+    {:ok, result} = Ecto.Adapters.SQL.query(Repo, "SELECT 1", [])
+    assert result.num_rows == 1
+  end
+end
+EOF
+      ;;
+    java) mkdir -p "$target/src/test/java/com/example/integration"
+      cat > "$target/src/test/java/com/example/integration/DatabaseConnectionTest.java" <<'EOF'
+package com.example.integration;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import javax.sql.DataSource;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+@SpringBootTest class DatabaseConnectionTest {
+    @Autowired private DataSource ds;
+    @Test void connect() throws Exception { try (var c = ds.getConnection()) { assertNotNull(c); } }
+}
+EOF
+      ;;
+  esac
+  ok "Generated database integration test"
+
+  # ── Makefile targets (uses _DB_* vars) ─────────────
+  local p=""; [ "$IS_FULLSTACK" = true ] && p="cd backend && "
+  sed -i.bak 's/^\(\.PHONY:.*\)/\1 \\\n       db-migrate db-seed db-reset db-studio/' "$ROOT_DIR/Makefile"
+  rm -f "$ROOT_DIR/Makefile.bak"
+
+  cat >> "$ROOT_DIR/Makefile" <<MKEOF
+
+# ──────────────────────────────────────────────
+# Database
+# ──────────────────────────────────────────────
+
+db-migrate: ## Run database migrations
+	@${p}${_DB_MIGRATE}
+
+db-seed: ## Seed the database
+	@${p}${_DB_SEED}
+
+db-reset: ## Reset the database (drop + migrate + seed)
+	@${p}${_DB_RESET}
+
+db-studio: ## Open database GUI / studio
+	@${p}${_DB_STUDIO}
+MKEOF
+  ok "Added database targets to Makefile"
+
+  # ── SQLite + serverless warning ────────────────────
+  if [ "$engine" = "sqlite" ]; then
+    case "${DEPLOY_PROVIDER:-}" in
+      *Vercel*|*Netlify*|*Cloudflare*|*"AWS Lambda"*)
+        warn "SQLite won't work in production with ${DEPLOY_PROVIDER} (ephemeral filesystem)."
+        warn "Consider PostgreSQL or Turso (cloud SQLite) for production."
+        ;;
+    esac
+  fi
+}
+
 # ── resolve_stack: sets _LINTER, _FMT, _TEST, _E2E, _SETUP, _CI, _PKG
 #    for a given framework name. Used for both single-stack and fullstack.
 resolve_stack() {
@@ -1659,6 +2417,17 @@ if [ -n "$DB_ENGINE" ]; then
   esac
   echo "DATABASE_URL=$DB_URL_PLACEHOLDER" >> "$ROOT_DIR/.env.example"
   ok "Wrote DATABASE_URL placeholder to .env.example"
+
+  # ── 5b. Generate database layer (ORM config, models, migrations) ──
+  if [ "$DB_ORM" != "none" ] && [ -n "$DB_ORM" ]; then
+    echo ""
+    info "Generating database layer for ${DB_ORM_CHOICE}..."
+
+    DB_TARGET="$ROOT_DIR"
+    [ "$IS_FULLSTACK" = true ] && DB_TARGET="$ROOT_DIR/backend"
+
+    generate_database_layer "$DB_ORM" "$DB_ENGINE" "$STACK_LANG" "$DB_TARGET" "$EFFECTIVE_STACK"
+  fi
 fi
 
 # ── 6. Configure lint script ────────────────────────
@@ -2800,6 +3569,11 @@ fi
 
 if [ "${MONITOR_CHOICE:-}" != "None / I'll configure later" ] && [ -n "${MONITOR_CHOICE:-}" ]; then
   echo "  6. Run:  make monitor-test        (verify ${MONITOR_CHOICE} integration)"
+fi
+
+if [ -n "$DB_ORM" ] && [ "$DB_ORM" != "none" ]; then
+  echo "  7. Run:  make db-migrate          (run initial database migration)"
+  echo "  8. Read: db/README.md             (database setup and ORM guide)"
 fi
 
 echo ""
